@@ -30,3 +30,15 @@ def test_main_window_open_playback_creates_playback_source(tmp_path, monkeypatch
     window.open_playback_file(str(bsf_path))
     assert window.source is not None
     window.source.stop()
+
+
+def test_on_ping_received_adds_one_row_without_raising():
+    import numpy as np
+
+    window = MainWindow(AppConfig())
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+
+    before = window.waterfall.rows_written
+    window._on_ping_received(port_raw, stbd_raw, {})
+    assert window.waterfall.rows_written == before + 1

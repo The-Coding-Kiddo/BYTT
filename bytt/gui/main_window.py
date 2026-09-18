@@ -80,9 +80,15 @@ class MainWindow(QMainWindow):
         self.source.ping_received.connect(self._on_ping_received)
 
     def _on_ping_received(self, port_raw, stbd_raw, meta) -> None:
+        # build_display_row interpolates EACH channel to channel_w samples,
+        # then concatenates them with a gap in between, so the resulting row
+        # length is 2*channel_w + gap. Solve for channel_w so that total
+        # equals self.waterfall.width, which is what add_row() requires.
+        gap = 8
+        channel_w = (self.waterfall.width - gap) // 2
         row_f32 = build_display_row(
-            port_raw, stbd_raw, channel_w=self.waterfall.width,
-            port_on=True, stbd_on=True, gap=8, interp_xs_cache=self._interp_cache,
+            port_raw, stbd_raw, channel_w=channel_w,
+            port_on=True, stbd_on=True, gap=gap, interp_xs_cache=self._interp_cache,
         )
         row_2d = row_f32.reshape(1, -1)
         # enhance_pixels returns a 3-tuple (img8, target_mask, shadow_mask);
