@@ -1,6 +1,8 @@
 """Main application window: menu/toolbar/status bar, wires whichever ping
 source (LiveClient or PlaybackSource) is active to the waterfall display."""
-from PySide6.QtWidgets import QMainWindow, QFileDialog, QInputDialog
+from PySide6.QtWidgets import (
+    QMainWindow, QFileDialog, QInputDialog, QToolBar, QLabel,
+)
 from PySide6.QtGui import QAction
 from bytt.config import AppConfig
 from bytt.net.live_client import LiveClient
@@ -41,6 +43,27 @@ class MainWindow(QMainWindow):
         disconnect_action.triggered.connect(self.disconnect_source)
         connect_menu.addAction(disconnect_action)
 
+        self.playback_toolbar = QToolBar("Playback", self)
+        self.addToolBar(self.playback_toolbar)
+
+        self.play_pause_action = QAction("Play", self)
+        self.play_pause_action.triggered.connect(self._toggle_play_pause)
+        self.playback_toolbar.addAction(self.play_pause_action)
+
+        self.step_back_action = QAction("Step Back", self)
+        self.step_back_action.triggered.connect(self._step_backward)
+        self.playback_toolbar.addAction(self.step_back_action)
+
+        self.step_fwd_action = QAction("Step Forward", self)
+        self.step_fwd_action.triggered.connect(self._step_forward)
+        self.playback_toolbar.addAction(self.step_fwd_action)
+
+        self.position_label = QLabel("")
+        self.playback_toolbar.addWidget(self.position_label)
+
+        self._is_playing = False
+        self.playback_toolbar.setVisible(False)
+
         self.statusBar().showMessage("disconnected")
 
     def closeEvent(self, event):
@@ -79,10 +102,45 @@ class MainWindow(QMainWindow):
         if self.source is not None:
             self.source.stop()
             self.source = None
+        self.playback_toolbar.setVisible(False)
+        self._is_playing = False
 
     def _wire_source(self) -> None:
         self.source.status_changed.connect(self.statusBar().showMessage)
         self.source.ping_received.connect(self._on_ping_received)
+        is_playback = isinstance(self.source, PlaybackSource)
+        self.playback_toolbar.setVisible(is_playback)
+        if is_playback:
+            self.source.position_changed.connect(self._on_position_changed)
+            self._is_playing = True
+            self.play_pause_action.setText("Pause")
+
+    def _toggle_play_pause(self) -> None:
+        if not isinstance(self.source, PlaybackSource):
+            return
+        if self._is_playing:
+            self.source.pause()
+            self._is_playing = False
+            self.play_pause_action.setText("Play")
+        else:
+            self.source.resume()
+            self._is_playing = True
+            self.play_pause_action.setText("Pause")
+
+    def _step_forward(self) -> None:
+        if isinstance(self.source, PlaybackSource):
+            self.source.step_forward()
+            self._is_playing = False
+            self.play_pause_action.setText("Play")
+
+    def _step_backward(self) -> None:
+        if isinstance(self.source, PlaybackSource):
+            self.source.step_backward()
+            self._is_playing = False
+            self.play_pause_action.setText("Play")
+
+    def _on_position_changed(self, current_index: int, total_pings: int) -> None:
+        self.position_label.setText(f"Ping {current_index + 1} / {total_pings}")
 
     def _on_ping_received(self, port_raw, stbd_raw, meta) -> None:
         # build_display_row interpolates EACH channel to channel_w samples,

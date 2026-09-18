@@ -85,3 +85,68 @@ def test_close_event_disconnects_source_and_closes_command_client(tmp_path):
 
     assert window.source is None
     assert closed["called"] is True
+
+
+def test_playback_toolbar_hidden_when_disconnected():
+    window = MainWindow(AppConfig())
+    assert window.playback_toolbar.isVisible() is False
+
+def test_playback_toolbar_visible_after_opening_playback_file(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))  # 0 pings is fine; we're testing toolbar visibility
+
+    window = MainWindow(AppConfig())
+    window.show()  # isVisible() reflects ancestor visibility, so the window
+                    # must actually be shown for this assertion to be meaningful
+    window.open_playback_file(str(bsf_path))
+    assert window.playback_toolbar.isVisible() is True
+    window.source.stop()
+
+def test_toggle_play_pause_calls_source_pause_and_resume(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+
+    calls = []
+    window.source.pause = lambda: calls.append('pause')
+    window.source.resume = lambda: calls.append('resume')
+
+    window._toggle_play_pause()  # starts "playing" -> should pause
+    assert calls == ['pause']
+    assert window.play_pause_action.text() == "Play"
+
+    window._toggle_play_pause()  # now "paused" -> should resume
+    assert calls == ['pause', 'resume']
+    assert window.play_pause_action.text() == "Pause"
+
+    window.source.stop()
+
+def test_step_buttons_call_source_step_methods(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+
+    calls = []
+    window.source.step_forward = lambda: calls.append('fwd')
+    window.source.step_backward = lambda: calls.append('back')
+
+    window._step_forward()
+    window._step_backward()
+    assert calls == ['fwd', 'back']
+
+    window.source.stop()
+
+def test_on_position_changed_updates_label():
+    window = MainWindow(AppConfig())
+    window._on_position_changed(4, 10)
+    assert window.position_label.text() == "Ping 5 / 10"
