@@ -134,6 +134,11 @@ class LiveClient(QObject):
             return None
         if total_packet <= 1 or packet_num < 1:
             return body_and_data
+        if packet_num > total_packet:
+            # Out-of-range fragment number — can't belong to a well-formed
+            # frame of this size. Drop it rather than corrupting/growing the
+            # partial-frame entry with a key the final join won't expect.
+            return None
         key = (packet_type, frame_id)
         entry = self._partial_frames.get(key)
         if entry is None or entry['total'] != total_packet:
@@ -143,6 +148,11 @@ class LiveClient(QObject):
         if len(entry['parts']) < total_packet:
             return None
         del self._partial_frames[key]
+        if set(entry['parts'].keys()) != set(range(1, total_packet + 1)):
+            # Defensive: state got confused somehow (e.g. duplicate packet
+            # numbers padding out the count). Drop the stale/corrupt entry
+            # instead of KeyError-ing on the join below.
+            return None
         return b''.join(entry['parts'][i] for i in range(1, total_packet + 1))
 
     def _handle_3101(self, body_and_data):

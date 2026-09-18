@@ -42,3 +42,46 @@ def test_on_ping_received_adds_one_row_without_raising():
     before = window.waterfall.rows_written
     window._on_ping_received(port_raw, stbd_raw, {})
     assert window.waterfall.rows_written == before + 1
+
+
+def test_on_ping_received_reports_error_via_status_bar_on_malformed_input():
+    import numpy as np
+
+    window = MainWindow(AppConfig())
+    before = window.waterfall.rows_written
+    # Empty channel arrays (e.g. what extract_raw_channels now returns for a
+    # corrupt/oversized half_samples field) can't be interpolated sensibly —
+    # this must not crash the Qt slot or vanish silently.
+    port_raw = np.zeros(0, dtype=np.float32)
+    stbd_raw = np.zeros(0, dtype=np.float32)
+
+    window._on_ping_received(port_raw, stbd_raw, {})
+
+    assert window.waterfall.rows_written == before
+    assert window.statusBar().currentMessage() != ""
+
+
+def test_close_event_disconnects_source_and_closes_command_client(tmp_path):
+    from bytt.protocol import constants as pc
+
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+    assert window.source is not None
+
+    closed = {"called": False}
+    orig_close = window.command_client.close
+
+    def spy_close():
+        closed["called"] = True
+        orig_close()
+
+    window.command_client.close = spy_close
+
+    window.close()
+
+    assert window.source is None
+    assert closed["called"] is True

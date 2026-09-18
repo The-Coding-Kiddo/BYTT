@@ -22,6 +22,8 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> AppConfig:
         return AppConfig()
     parser = configparser.ConfigParser()
     parser.read(path)
+    if "Sonar" not in parser:
+        return AppConfig()
     section = parser["Sonar"]
     return AppConfig(
         towfish_ip=section.get("TowfishIP", AppConfig.towfish_ip),

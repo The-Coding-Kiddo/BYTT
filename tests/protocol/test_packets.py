@@ -59,6 +59,22 @@ def test_extract_nav_fix_rejects_out_of_range():
     struct.pack_into(pc.NAV_FIELD_FMT, nav, pc.NAV_LON_OFFSET, 10.0)
     assert packets.extract_nav_fix(bytes(nav)) is None
 
+def test_extract_raw_channels_rejects_absurd_half_samples():
+    import time
+    # Build a minimal ping buffer with an absurd half_samples value in
+    # channel 0's field, and no actual sample data behind it. A naive
+    # implementation would try to np.zeros(2 * n) allocate ~34GB here.
+    ping = bytearray(pc.SAMPLE_OFFSET)
+    off = pc.CH_SR_OFFSET + 0 * pc.CH_SR_SIZE
+    struct.pack_into('<I', ping, off + 52, 0xFFFFFFFF)  # half_samples
+    start = time.monotonic()
+    port, stbd = packets.extract_raw_channels(bytes(ping))
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.0
+    assert port.size == 0
+    assert stbd.size == 0
+
+
 def test_extract_nav_fix_accepts_valid_fix():
     nav = bytearray(pc.NAV_LON_OFFSET + 8)
     struct.pack_into(pc.NAV_FIELD_FMT, nav, pc.NAV_LAT_OFFSET, 41.3)

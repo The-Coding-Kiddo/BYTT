@@ -43,6 +43,11 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("disconnected")
 
+    def closeEvent(self, event):
+        self.disconnect_source()
+        self.command_client.close()
+        super().closeEvent(event)
+
     def _prompt_connect_towfish(self):
         host, ok = QInputDialog.getText(self, "Connect to Towfish", "Towfish IP:",
                                          text=self.config.towfish_ip)
@@ -83,17 +88,20 @@ class MainWindow(QMainWindow):
         # build_display_row interpolates EACH channel to channel_w samples,
         # then concatenates them with a gap in between, so the resulting row
         # length is 2*channel_w + gap. Solve for channel_w so that total
-        # equals self.waterfall.width, which is what add_row() requires.
-        gap = 8
-        channel_w = (self.waterfall.width - gap) // 2
-        row_f32 = build_display_row(
-            port_raw, stbd_raw, channel_w=channel_w,
-            port_on=True, stbd_on=True, gap=gap, interp_xs_cache=self._interp_cache,
-        )
-        row_2d = row_f32.reshape(1, -1)
-        # enhance_pixels returns a 3-tuple (img8, target_mask, shadow_mask);
-        # img8 has shape (1, width) here, so row 0 is the 1D uint8 row
-        # add_row() expects.
-        img8, target_mask, shadow_mask = enhance_pixels(row_2d, _DEFAULT_ENHANCE_PARAMS)
-        row_u8 = img8[0]
-        self.waterfall.add_row(row_u8)
+        # equals self.waterfall.row_width, which is what add_row() requires.
+        try:
+            gap = 8
+            channel_w = (self.waterfall.row_width - gap) // 2
+            row_f32 = build_display_row(
+                port_raw, stbd_raw, channel_w=channel_w,
+                port_on=True, stbd_on=True, gap=gap, interp_xs_cache=self._interp_cache,
+            )
+            row_2d = row_f32.reshape(1, -1)
+            # enhance_pixels returns a 3-tuple (img8, target_mask, shadow_mask);
+            # img8 has shape (1, width) here, so row 0 is the 1D uint8 row
+            # add_row() expects.
+            img8, target_mask, shadow_mask = enhance_pixels(row_2d, _DEFAULT_ENHANCE_PARAMS)
+            row_u8 = img8[0]
+            self.waterfall.add_row(row_u8)
+        except Exception as e:
+            self.statusBar().showMessage(f"ping display error: {e}")

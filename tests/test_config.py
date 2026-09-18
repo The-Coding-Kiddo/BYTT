@@ -14,6 +14,16 @@ def test_save_then_load_round_trip(tmp_path):
     loaded = load_config(path)
     assert loaded == original
 
+def test_load_config_missing_sonar_section_returns_defaults(tmp_path):
+    path = tmp_path / "no_sonar.ini"
+    parser = configparser.ConfigParser()
+    parser["Other"] = {"Foo": "bar"}
+    with open(path, "w") as f:
+        parser.write(f)
+    cfg = load_config(path)
+    assert cfg == AppConfig()
+
+
 def test_save_config_writes_expected_ini_shape(tmp_path):
     path = tmp_path / "bytt.ini"
     save_config(AppConfig(towfish_ip="10.0.0.1", cmd_port=16128, data_port=16129,

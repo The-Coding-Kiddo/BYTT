@@ -30,7 +30,7 @@ class WaterfallView(pg.GraphicsLayoutWidget):
     def __init__(self, max_rows=2000, width=1024, palette="Amber", parent=None):
         super().__init__(parent)
         self.max_rows = max_rows
-        self.width = width
+        self.row_width = width
         self.rows_written = 0
         self.image_buffer = np.zeros((max_rows, width, 3), dtype=np.uint8)
         self._combined_lut = build_combined_lut(gain=1.0, gamma=1.0,
@@ -47,7 +47,10 @@ class WaterfallView(pg.GraphicsLayoutWidget):
         self._refresh()
 
     def add_row(self, row_uint8: np.ndarray) -> None:
-        """row_uint8: 1D array of length self.width, dtype uint8 intensity."""
+        """row_uint8: 1D array of length self.row_width, dtype uint8 intensity."""
+        if row_uint8.shape[0] != self.row_width:
+            raise ValueError(
+                f"add_row expected a row of length {self.row_width}, got {row_uint8.shape[0]}")
         rgb_row = self._combined_lut[row_uint8]
         self.image_buffer = np.roll(self.image_buffer, -1, axis=0)
         self.image_buffer[-1] = rgb_row

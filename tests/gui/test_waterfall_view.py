@@ -32,3 +32,18 @@ def test_waterfall_view_add_row_grows_image_buffer():
     view.add_row(row)
     assert view.image_buffer.shape == (10, 8, 3)
     assert view.rows_written == 2
+
+
+def test_waterfall_view_row_width_attribute_does_not_shadow_qwidget_width():
+    view = WaterfallView(max_rows=10, width=8)
+    assert view.row_width == 8
+    # QWidget.width() must remain callable — this is the bug being guarded
+    # against (assigning a plain int to `self.width` shadows the bound method).
+    assert callable(view.width)
+
+
+def test_waterfall_view_add_row_raises_on_wrong_length_input():
+    view = WaterfallView(max_rows=10, width=8)
+    bad_row = np.full(5, 200, dtype=np.uint8)
+    with pytest.raises(ValueError):
+        view.add_row(bad_row)

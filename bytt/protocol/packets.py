@@ -45,6 +45,12 @@ def extract_nav_fix(nav_bytes):
 def extract_raw_channels(ping, p_lo=pc.AMP_NORM_P_LO_DEFAULT, p_hi=pc.AMP_NORM_P_HI_DEFAULT):
     ch   = parse_channel(ping, 0)
     n    = ch['half_samples']
+    if n <= 0 or n > 200_000:
+        # Untrusted, file-controlled length field — same bound as
+        # parse_3101_body. Refuse to allocate based on it; return an
+        # empty-but-valid pair of channel arrays instead.
+        empty = np.zeros(0, dtype=np.float32)
+        return empty, empty
     base = pc.SAMPLE_OFFSET
     mb   = len(ping)
     raw_data = np.zeros(2 * n, dtype='<u4')
