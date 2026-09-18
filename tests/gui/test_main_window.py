@@ -1,5 +1,7 @@
 import pytest
 from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QTest
+from PySide6.QtCore import Qt as QtCoreQt
 from bytt.gui.main_window import MainWindow
 from bytt.config import AppConfig
 
@@ -183,3 +185,62 @@ def test_scrub_slider_release_calls_source_seek(tmp_path):
     assert calls == [6]
 
     window.source.stop()
+
+def test_space_shortcut_toggles_play_pause(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+
+    calls = []
+    window.source.pause = lambda: calls.append('pause')
+    window.source.resume = lambda: calls.append('resume')
+
+    # QShortcut's default context is Qt::WindowShortcut, which only fires
+    # while the shortcut's window is the active window. QTest.keyClick alone
+    # (without show()+processEvents()) delivers the key event but the
+    # shortcut never activates, so the window must actually be shown first.
+    window.show()
+    QApplication.instance().processEvents()
+    QTest.keyClick(window, QtCoreQt.Key.Key_Space)
+    assert calls == ['pause']
+
+    window.source.stop()
+
+def test_arrow_shortcuts_step(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+
+    calls = []
+    window.source.step_forward = lambda: calls.append('fwd')
+    window.source.step_backward = lambda: calls.append('back')
+
+    # See test_space_shortcut_toggles_play_pause for why show()+processEvents()
+    # is required before QShortcut (WindowShortcut context) will fire.
+    window.show()
+    QApplication.instance().processEvents()
+    QTest.keyClick(window, QtCoreQt.Key.Key_Right)
+    QTest.keyClick(window, QtCoreQt.Key.Key_Left)
+    assert calls == ['fwd', 'back']
+
+    window.source.stop()
+
+def test_q_and_escape_close_the_window():
+    window = MainWindow(AppConfig())
+    closed = []
+    window.closeEvent = lambda event: (closed.append('closed'), event.accept())[-1]
+
+    # See test_space_shortcut_toggles_play_pause for why show()+processEvents()
+    # is required before QShortcut (WindowShortcut context) will fire.
+    window.show()
+    QApplication.instance().processEvents()
+    QTest.keyClick(window, QtCoreQt.Key.Key_Q)
+    assert closed == ['closed']

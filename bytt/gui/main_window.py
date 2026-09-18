@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QFileDialog, QInputDialog, QToolBar, QLabel, QSlider,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QShortcut, QKeySequence
 from bytt.config import AppConfig
 from bytt.net.live_client import LiveClient
 from bytt.net.command_client import CommandClient
@@ -71,6 +71,21 @@ class MainWindow(QMainWindow):
 
         self._is_playing = False
         self.playback_toolbar.setVisible(False)
+
+        self._space_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
+        self._space_shortcut.activated.connect(self._toggle_play_pause)
+
+        self._left_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Left), self)
+        self._left_shortcut.activated.connect(self._step_backward)
+
+        self._right_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Right), self)
+        self._right_shortcut.activated.connect(self._step_forward)
+
+        self._quit_shortcut_q = QShortcut(QKeySequence(Qt.Key.Key_Q), self)
+        self._quit_shortcut_q.activated.connect(self.close)
+
+        self._quit_shortcut_esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        self._quit_shortcut_esc.activated.connect(self.close)
 
         self.statusBar().showMessage("disconnected")
 
