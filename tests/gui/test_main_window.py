@@ -233,6 +233,24 @@ def test_arrow_shortcuts_step(tmp_path):
 
     window.source.stop()
 
+def test_playback_finished_status_reverts_play_pause_button(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+    assert window._is_playing is True
+    assert window.play_pause_action.text() == "Pause"
+
+    window._on_source_status_changed('playback finished')
+
+    assert window._is_playing is False
+    assert window.play_pause_action.text() == "Play"
+
+    window.source.stop()
+
 def test_q_and_escape_close_the_window():
     window = MainWindow(AppConfig())
     closed = []

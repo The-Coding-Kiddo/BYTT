@@ -7,6 +7,9 @@ from bytt.net.playback_source import PlaybackSource
 
 @pytest.fixture(scope="module", autouse=True)
 def qt_app():
+    # tests/conftest.py's session-scoped fixture already created a real
+    # QApplication before this fixture runs; QCoreApplication.instance()
+    # returns that same (compatible) instance here.
     app = QCoreApplication.instance() or QCoreApplication([])
     yield app
 
@@ -206,7 +209,16 @@ def test_step_backward_at_first_ping_is_a_noop(tmp_path):
     assert len(received) >= 1
     source.pause()
     QCoreApplication.processEvents()
-    count_before = len(received)  # should be 1, at index 0
+
+    # Pin the position deterministically instead of relying on the
+    # background thread still being at index 0 by the time pause() lands.
+    source.seek(0)
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(received) < 2:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    assert len(received) == 2
+    count_before = len(received)  # at index 0
 
     source.step_backward()
     time.sleep(0.2)
@@ -271,5 +283,47 @@ def test_seek_clamps_out_of_range_input(tmp_path):
         QCoreApplication.processEvents()
         time.sleep(0.005)
     assert positions[-1] == 4
+
+    source.stop()
+
+def test_controls_still_work_after_playback_reaches_end_of_file(tmp_path):
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(_build_bsf_bytes_n(n_pings=3))
+
+    positions = []
+    statuses = []
+    source = PlaybackSource(str(bsf_path), pings_per_second=1000)  # fast, run to EOF quickly
+    source.position_changed.connect(lambda idx, total: positions.append(idx))
+    source.status_changed.connect(statuses.append)
+    source.start()
+
+    # Let playback run unattended to natural end-of-file (index 2, the last
+    # of 3 pings). The background thread must NOT exit here -- it should
+    # clamp at the last index, pause itself, and stay alive/seekable.
+    deadline = time.time() + 3.0
+    while time.time() < deadline and 'playback finished' not in statuses:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    assert 'playback finished' in statuses
+
+    # Give it a moment to make sure it doesn't keep emitting once finished.
+    QCoreApplication.processEvents()
+
+    # Controls issued after natural end-of-file must still work: seek(0)
+    # should emit ping_received/position_changed for index 0.
+    positions_before = len(positions)
+    source.seek(0)
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(positions) == positions_before:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    assert len(positions) > positions_before
+    assert positions[-1] == 0
+
+    # resume() after that must not crash.
+    source.resume()
+    QCoreApplication.processEvents()
+    time.sleep(0.05)
+    QCoreApplication.processEvents()
 
     source.stop()

@@ -130,6 +130,7 @@ class MainWindow(QMainWindow):
 
     def _wire_source(self) -> None:
         self.source.status_changed.connect(self.statusBar().showMessage)
+        self.source.status_changed.connect(self._on_source_status_changed)
         self.source.ping_received.connect(self._on_ping_received)
         is_playback = isinstance(self.source, PlaybackSource)
         self.playback_toolbar.setVisible(is_playback)
@@ -159,6 +160,14 @@ class MainWindow(QMainWindow):
     def _step_backward(self) -> None:
         if isinstance(self.source, PlaybackSource):
             self.source.step_backward()
+            self._is_playing = False
+            self.play_pause_action.setText("Play")
+
+    def _on_source_status_changed(self, message: str) -> None:
+        if message == 'playback finished':
+            # PlaybackSource pauses itself (rather than exiting) when it
+            # naturally reaches end-of-file, so reflect that here the same
+            # way _toggle_play_pause does for a user-initiated pause.
             self._is_playing = False
             self.play_pause_action.setText("Play")
 

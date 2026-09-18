@@ -4,7 +4,6 @@ playback apart. Adds pause/resume/step/seek on top of that shared
 interface -- PlaybackSource-only, since a live feed has no "past" to
 step back into."""
 import threading
-import time
 from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 from bytt.bsf.file_io import load_all_pings
@@ -99,10 +98,11 @@ class PlaybackSource(QObject):
         while self._paused.is_set() and not self._stop.is_set():
             pending = self._consume_pending_seek()
             if pending is not None:
-                self._current_index = pending
+                with self._seek_lock:
+                    self._current_index = pending
                 self._emit_current()
                 return True
-            time.sleep(0.05)
+            self._stop.wait(0.05)
         return False
 
     def _run(self):
@@ -121,18 +121,25 @@ class PlaybackSource(QObject):
             self.status_changed.emit('playback error: no ping records found')
             return
         self.status_changed.emit(f'connected — playback ({len(self._pings)} pings)')
+        finished_emitted = False
         while not self._stop.is_set():
             if self._paused.is_set():
                 self._wait_while_paused()
                 continue
             pending = self._consume_pending_seek()
             if pending is not None:
-                self._current_index = pending
+                with self._seek_lock:
+                    self._current_index = pending
             else:
-                self._current_index += 1
+                with self._seek_lock:
+                    self._current_index += 1
             if self._current_index >= len(self._pings):
-                break
+                with self._seek_lock:
+                    self._current_index = len(self._pings) - 1
+                self._paused.set()
+                if not finished_emitted:
+                    self.status_changed.emit('playback finished')
+                    finished_emitted = True
+                continue
             self._emit_current()
-            time.sleep(self._interval_s)
-        if not self._stop.is_set():
-            self.status_changed.emit('playback finished')
+            self._stop.wait(self._interval_s)
