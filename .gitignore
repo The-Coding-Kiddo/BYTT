@@ -1,2 +1,10 @@
 /venv
 /env
+venve/
+*.bsf
+!tests/fixtures/*.bsf
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+
