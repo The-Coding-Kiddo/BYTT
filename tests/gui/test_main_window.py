@@ -150,3 +150,36 @@ def test_on_position_changed_updates_label():
     window = MainWindow(AppConfig())
     window._on_position_changed(4, 10)
     assert window.position_label.text() == "Ping 5 / 10"
+
+def test_on_position_changed_updates_scrub_slider_when_not_dragging():
+    window = MainWindow(AppConfig())
+    window._on_position_changed(3, 10)
+    assert window.scrub_slider.maximum() == 9
+    assert window.scrub_slider.value() == 3
+
+def test_scrub_slider_ignores_position_updates_while_dragging():
+    window = MainWindow(AppConfig())
+    window._on_position_changed(2, 10)
+    window._on_scrub_pressed()
+    window._on_position_changed(7, 10)  # arrives mid-drag, must NOT move the slider
+    assert window.scrub_slider.value() == 2
+
+def test_scrub_slider_release_calls_source_seek(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+
+    calls = []
+    window.source.seek = lambda idx: calls.append(idx)
+
+    window.scrub_slider.setRange(0, 10)
+    window._on_scrub_pressed()
+    window.scrub_slider.setValue(6)
+    window._on_scrub_released()
+    assert calls == [6]
+
+    window.source.stop()

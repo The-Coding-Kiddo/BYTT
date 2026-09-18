@@ -1,8 +1,9 @@
 """Main application window: menu/toolbar/status bar, wires whichever ping
 source (LiveClient or PlaybackSource) is active to the waterfall display."""
 from PySide6.QtWidgets import (
-    QMainWindow, QFileDialog, QInputDialog, QToolBar, QLabel,
+    QMainWindow, QFileDialog, QInputDialog, QToolBar, QLabel, QSlider,
 )
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from bytt.config import AppConfig
 from bytt.net.live_client import LiveClient
@@ -60,6 +61,13 @@ class MainWindow(QMainWindow):
 
         self.position_label = QLabel("")
         self.playback_toolbar.addWidget(self.position_label)
+
+        self.scrub_slider = QSlider(Qt.Orientation.Horizontal)
+        self.scrub_slider.setRange(0, 0)
+        self.scrub_slider.sliderPressed.connect(self._on_scrub_pressed)
+        self.scrub_slider.sliderReleased.connect(self._on_scrub_released)
+        self.playback_toolbar.addWidget(self.scrub_slider)
+        self._scrub_dragging = False
 
         self._is_playing = False
         self.playback_toolbar.setVisible(False)
@@ -139,8 +147,21 @@ class MainWindow(QMainWindow):
             self._is_playing = False
             self.play_pause_action.setText("Play")
 
+    def _on_scrub_pressed(self) -> None:
+        self._scrub_dragging = True
+
+    def _on_scrub_released(self) -> None:
+        self._scrub_dragging = False
+        if isinstance(self.source, PlaybackSource):
+            self.source.seek(self.scrub_slider.value())
+
     def _on_position_changed(self, current_index: int, total_pings: int) -> None:
         self.position_label.setText(f"Ping {current_index + 1} / {total_pings}")
+        if not self._scrub_dragging:
+            self.scrub_slider.blockSignals(True)
+            self.scrub_slider.setRange(0, max(0, total_pings - 1))
+            self.scrub_slider.setValue(current_index)
+            self.scrub_slider.blockSignals(False)
 
     def _on_ping_received(self, port_raw, stbd_raw, meta) -> None:
         # build_display_row interpolates EACH channel to channel_w samples,
