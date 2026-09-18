@@ -30,6 +30,14 @@ CONTRAST_DEFAULT_IDX = 2
 
 TARGET_MODES = ["Off", "Top-Hat Bright", "Top-Hat Bright+Dark", "CFAR Contrast"]
 
+TARGET_KSIZE_MIN = 5
+TARGET_KSIZE_MAX = 51
+TARGET_KSIZE_STEP = 4
+TARGET_KSIZE_DEFAULT = 15
+
+GAIN_DEFAULT, GAIN_STEP, GAIN_MIN, GAIN_MAX = 1.0, 0.1, 0.1, 5.0
+GAMMA_DEFAULT, GAMMA_STEP, GAMMA_MIN, GAMMA_MAX = 1.0, 0.05, 0.1, 3.0
+
 _clahe_low  = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
 _clahe_med  = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
 _clahe_high = cv2.createCLAHE(clipLimit=6.0, tileGridSize=(8, 8))
@@ -202,3 +210,10 @@ def tint(rgb, mask, colour, alpha=0.55):
     region = rgb[mask].astype(np.float32)
     rgb[mask] = (region * (1 - alpha) + c * alpha).astype(np.uint8)
     return rgb
+
+
+DEFAULT_ENHANCE_PARAMS = EnhanceParams(
+    noise_idx=0, contrast_idx=CONTRAST_DEFAULT_IDX, agc=False, target_idx=0,
+    target_ksize=TARGET_KSIZE_DEFAULT, shadow_enh=False, overlay=False, sharpen=False,
+    gain=GAIN_DEFAULT, gamma=GAMMA_DEFAULT, lut_idx=0, fast=True, hdr=False,
+)
