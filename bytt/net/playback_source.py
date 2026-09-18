@@ -49,6 +49,35 @@ class PlaybackSource(QObject):
     def resume(self):
         self._paused.clear()
 
+    def step_forward(self) -> None:
+        if not self._pings:
+            return
+        self.pause()
+        with self._seek_lock:
+            current = self._current_index
+            if current >= len(self._pings) - 1:
+                return
+            target = current + 1
+            self._pending_seek = target
+
+    def step_backward(self) -> None:
+        if not self._pings:
+            return
+        self.pause()
+        with self._seek_lock:
+            current = self._current_index
+            if current <= 0:
+                return
+            target = current - 1
+            self._pending_seek = target
+
+    def seek(self, ping_index: int) -> None:
+        if not self._pings:
+            return
+        target = max(0, min(ping_index, len(self._pings) - 1))
+        with self._seek_lock:
+            self._pending_seek = target
+
     def _consume_pending_seek(self):
         with self._seek_lock:
             v = self._pending_seek

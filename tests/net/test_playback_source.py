@@ -117,3 +117,100 @@ def test_position_changed_reports_index_and_total(tmp_path):
     assert len(positions) >= 5
     assert positions[0] == (0, 5)
     assert all(total == 5 for _idx, total in positions)
+
+def test_step_forward_emits_exactly_one_ping_and_pauses(tmp_path):
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(_build_bsf_bytes_n(n_pings=50))
+
+    received = []
+    source = PlaybackSource(str(bsf_path), pings_per_second=1000)
+    source.ping_received.connect(lambda port, stbd, meta: received.append(meta))
+    source.start()
+
+    deadline = time.time() + 3.0
+    while time.time() < deadline and len(received) < 5:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    assert len(received) >= 5
+
+    source.pause()
+    QCoreApplication.processEvents()
+    time.sleep(0.1)
+    QCoreApplication.processEvents()
+    count_before = len(received)
+
+    source.step_forward()
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(received) == count_before:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    assert len(received) == count_before + 1
+
+    # Confirm it's paused again after the step (no further auto-advance).
+    time.sleep(0.2)
+    QCoreApplication.processEvents()
+    assert len(received) == count_before + 1
+
+    source.stop()
+
+def test_step_forward_at_last_ping_is_a_noop(tmp_path):
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(_build_bsf_bytes_n(n_pings=3))
+
+    received = []
+    source = PlaybackSource(str(bsf_path), pings_per_second=20)
+    source.ping_received.connect(lambda port, stbd, meta: received.append(meta))
+    source.start()
+
+    # Wait for the very first ping (index 0) so we know self._pings is
+    # loaded, then pause immediately -- at 20 pings/sec (50ms interval),
+    # our reaction time is comfortably inside the window before the next
+    # scheduled emission, so pausing here is deterministic.
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(received) < 1:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    assert len(received) >= 1
+    source.pause()
+    QCoreApplication.processEvents()
+
+    # Now deterministically jump to the last index (2) while paused.
+    source.seek(2)
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(received) < 2:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    assert len(received) == 2
+    count_before = len(received)
+
+    source.step_forward()
+    time.sleep(0.2)
+    QCoreApplication.processEvents()
+    assert len(received) == count_before, "stepping past the last ping must not emit"
+
+    source.stop()
+
+def test_step_backward_at_first_ping_is_a_noop(tmp_path):
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(_build_bsf_bytes_n(n_pings=3))
+
+    received = []
+    source = PlaybackSource(str(bsf_path), pings_per_second=20)
+    source.ping_received.connect(lambda port, stbd, meta: received.append(meta))
+    source.start()
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(received) < 1:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    assert len(received) >= 1
+    source.pause()
+    QCoreApplication.processEvents()
+    count_before = len(received)  # should be 1, at index 0
+
+    source.step_backward()
+    time.sleep(0.2)
+    QCoreApplication.processEvents()
+    assert len(received) == count_before, "stepping before the first ping must not emit"
+
+    source.stop()
