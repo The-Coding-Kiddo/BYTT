@@ -4,6 +4,7 @@ that renders those rows (replaces the pygame-based FastWaterfall)."""
 import numpy as np
 import pyqtgraph as pg
 from bytt.processing.colormap import LUT_PALETTES, build_combined_lut
+from bytt.processing.enhancement import DEFAULT_ENHANCE_PARAMS, enhance_pixels
 
 
 def build_display_row(port_raw, stbd_raw, channel_w, port_on, stbd_on, gap,
@@ -32,7 +33,9 @@ class WaterfallView(pg.GraphicsLayoutWidget):
         self.max_rows = max_rows
         self.row_width = width
         self.rows_written = 0
+        self.raw_buffer = np.zeros((max_rows, width), dtype=np.float32)
         self.image_buffer = np.zeros((max_rows, width, 3), dtype=np.uint8)
+        self._enhance_params = DEFAULT_ENHANCE_PARAMS
         self._combined_lut = build_combined_lut(gain=1.0, gamma=1.0,
                                                   colour_lut=LUT_PALETTES[palette])
         self._plot = self.addPlot()
@@ -46,11 +49,16 @@ class WaterfallView(pg.GraphicsLayoutWidget):
                                                   colour_lut=LUT_PALETTES[name])
         self._refresh()
 
-    def add_row(self, row_uint8: np.ndarray) -> None:
-        """row_uint8: 1D array of length self.row_width, dtype uint8 intensity."""
-        if row_uint8.shape[0] != self.row_width:
+    def add_row(self, raw_row_f32: np.ndarray) -> None:
+        """raw_row_f32: 1D float32 array of length self.row_width, PRE-enhancement data."""
+        if raw_row_f32.shape[0] != self.row_width:
             raise ValueError(
-                f"add_row expected a row of length {self.row_width}, got {row_uint8.shape[0]}")
+                f"add_row expected a row of length {self.row_width}, got {raw_row_f32.shape[0]}")
+        self.raw_buffer = np.roll(self.raw_buffer, -1, axis=0)
+        self.raw_buffer[-1] = raw_row_f32
+        row2d = raw_row_f32.reshape(1, -1)
+        img8, _target_mask, _shadow_mask = enhance_pixels(row2d, self._enhance_params)
+        row_uint8 = img8[0]
         rgb_row = self._combined_lut[row_uint8]
         self.image_buffer = np.roll(self.image_buffer, -1, axis=0)
         self.image_buffer[-1] = rgb_row

@@ -27,10 +27,11 @@ def test_build_display_row_single_channel_only():
 
 def test_waterfall_view_add_row_grows_image_buffer():
     view = WaterfallView(max_rows=10, width=8)
-    row = np.full(8, 200, dtype=np.uint8)
+    row = np.linspace(0.0, 1.0, 8, dtype=np.float32)
     view.add_row(row)
     view.add_row(row)
     assert view.image_buffer.shape == (10, 8, 3)
+    assert view.raw_buffer.shape == (10, 8)
     assert view.rows_written == 2
 
 
@@ -44,6 +45,16 @@ def test_waterfall_view_row_width_attribute_does_not_shadow_qwidget_width():
 
 def test_waterfall_view_add_row_raises_on_wrong_length_input():
     view = WaterfallView(max_rows=10, width=8)
-    bad_row = np.full(5, 200, dtype=np.uint8)
+    bad_row = np.linspace(0.0, 1.0, 5, dtype=np.float32)
     with pytest.raises(ValueError):
         view.add_row(bad_row)
+
+
+def test_waterfall_view_add_row_stores_raw_data_in_ring_buffer():
+    view = WaterfallView(max_rows=3, width=4)
+    row_a = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+    row_b = np.array([0.5, 0.6, 0.7, 0.8], dtype=np.float32)
+    view.add_row(row_a)
+    view.add_row(row_b)
+    assert np.allclose(view.raw_buffer[-1], row_b)
+    assert np.allclose(view.raw_buffer[-2], row_a)
