@@ -214,3 +214,62 @@ def test_step_backward_at_first_ping_is_a_noop(tmp_path):
     assert len(received) == count_before, "stepping before the first ping must not emit"
 
     source.stop()
+
+def test_seek_jumps_to_arbitrary_position(tmp_path):
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(_build_bsf_bytes_n(n_pings=20))
+
+    positions = []
+    source = PlaybackSource(str(bsf_path), pings_per_second=20)
+    source.position_changed.connect(lambda idx, total: positions.append(idx))
+    source.start()
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(positions) < 1:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    assert len(positions) >= 1
+    source.pause()
+    QCoreApplication.processEvents()
+
+    source.seek(15)
+    deadline = time.time() + 2.0
+    while time.time() < deadline and 15 not in positions:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    assert 15 in positions
+
+    source.stop()
+
+def test_seek_clamps_out_of_range_input(tmp_path):
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(_build_bsf_bytes_n(n_pings=5))
+
+    positions = []
+    source = PlaybackSource(str(bsf_path), pings_per_second=20)
+    source.position_changed.connect(lambda idx, total: positions.append(idx))
+    source.start()
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(positions) < 1:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    assert len(positions) >= 1
+    source.pause()
+    QCoreApplication.processEvents()
+
+    source.seek(-5)  # must clamp to 0, not raise
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(positions) < 2:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    assert positions[-1] == 0
+
+    source.seek(9999)  # must clamp to the last valid index (4), not raise
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(positions) < 3:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    assert positions[-1] == 4
+
+    source.stop()
