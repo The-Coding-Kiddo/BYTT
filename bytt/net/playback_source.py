@@ -42,6 +42,9 @@ class PlaybackSource(QObject):
         if self._thread:
             self._thread.join(timeout=2.0)
 
+    def set_speed(self, interval_s: float) -> None:
+        self._interval_s = max(0.0, interval_s)
+
     def pause(self):
         self._paused.set()
 

@@ -18,6 +18,10 @@ _DEFAULT_ENHANCE_PARAMS = EnhanceParams(
     lut_idx=0, fast=True, hdr=False,
 )
 
+_SPEED_LABELS = ["1×", "2×", "4×", "8×", "16×", "32×", "MAX"]
+_SPEED_MULTIPLIERS = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, None]  # None = MAX (zero delay)
+_BASE_PINGS_PER_SECOND = 16.0  # matches PlaybackSource's own constructor default
+
 
 class MainWindow(QMainWindow):
     def __init__(self, config: AppConfig, parent=None):
@@ -69,6 +73,24 @@ class MainWindow(QMainWindow):
         self.playback_toolbar.addWidget(self.scrub_slider)
         self._scrub_dragging = False
 
+        self.speed_dec_action = QAction("−", self)
+        self.speed_dec_action.triggered.connect(self._speed_dec)
+        self.playback_toolbar.addAction(self.speed_dec_action)
+
+        self.speed_label = QLabel("")
+        self.playback_toolbar.addWidget(self.speed_label)
+
+        self.speed_inc_action = QAction("+", self)
+        self.speed_inc_action.triggered.connect(self._speed_inc)
+        self.playback_toolbar.addAction(self.speed_inc_action)
+
+        self.home_action = QAction("Home", self)
+        self.home_action.triggered.connect(self._home)
+        self.playback_toolbar.addAction(self.home_action)
+
+        self._speed_idx = 2  # default "4×", matching the original viewer's default
+        self._apply_speed()
+
         self._is_playing = False
         self.playback_toolbar.setVisible(False)
 
@@ -86,6 +108,15 @@ class MainWindow(QMainWindow):
 
         self._quit_shortcut_esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
         self._quit_shortcut_esc.activated.connect(self.close)
+
+        self._speed_up_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Up), self)
+        self._speed_up_shortcut.activated.connect(self._speed_inc)
+
+        self._speed_down_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Down), self)
+        self._speed_down_shortcut.activated.connect(self._speed_dec)
+
+        self._home_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Home), self)
+        self._home_shortcut.activated.connect(self._home)
 
         self.statusBar().showMessage("disconnected")
 
@@ -138,6 +169,7 @@ class MainWindow(QMainWindow):
             self.source.position_changed.connect(self._on_position_changed)
             self._is_playing = True
             self.play_pause_action.setText("Pause")
+            self._apply_speed()
 
     def _toggle_play_pause(self) -> None:
         if not isinstance(self.source, PlaybackSource):
@@ -162,6 +194,28 @@ class MainWindow(QMainWindow):
             self.source.step_backward()
             self._is_playing = False
             self.play_pause_action.setText("Play")
+
+    def _apply_speed(self) -> None:
+        multiplier = _SPEED_MULTIPLIERS[self._speed_idx]
+        self.speed_label.setText(_SPEED_LABELS[self._speed_idx])
+        if isinstance(self.source, PlaybackSource):
+            interval_s = 0.0 if multiplier is None else 1.0 / (_BASE_PINGS_PER_SECOND * multiplier)
+            self.source.set_speed(interval_s)
+
+    def _speed_dec(self) -> None:
+        self._speed_idx = max(0, self._speed_idx - 1)
+        self._apply_speed()
+
+    def _speed_inc(self) -> None:
+        self._speed_idx = min(len(_SPEED_LABELS) - 1, self._speed_idx + 1)
+        self._apply_speed()
+
+    def _home(self) -> None:
+        if isinstance(self.source, PlaybackSource):
+            self.source.seek(0)
+            self.source.resume()
+            self._is_playing = True
+            self.play_pause_action.setText("Pause")
 
     def _on_source_status_changed(self, message: str) -> None:
         if message == 'playback finished':

@@ -251,6 +251,109 @@ def test_playback_finished_status_reverts_play_pause_button(tmp_path):
 
     window.source.stop()
 
+def test_speed_inc_dec_update_label_and_clamp():
+    window = MainWindow(AppConfig())
+    assert window.speed_label.text() == "4×"
+
+    window._speed_inc()
+    assert window.speed_label.text() == "8×"
+    window._speed_inc()
+    assert window.speed_label.text() == "16×"
+    window._speed_inc()
+    assert window.speed_label.text() == "32×"
+    window._speed_inc()
+    assert window.speed_label.text() == "MAX"
+    window._speed_inc()  # already at max, must not go out of range
+    assert window.speed_label.text() == "MAX"
+
+    window._speed_dec()
+    assert window.speed_label.text() == "32×"
+    window._speed_dec()
+    window._speed_dec()
+    window._speed_dec()
+    window._speed_dec()
+    window._speed_dec()
+    assert window.speed_label.text() == "1×"
+    window._speed_dec()  # already at min, must not go out of range
+    assert window.speed_label.text() == "1×"
+
+
+def test_speed_inc_applies_interval_to_connected_playback_source(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+
+    calls = []
+    window.source.set_speed = lambda interval_s: calls.append(interval_s)
+
+    window._speed_inc()  # default idx 2 (4x) -> idx 3 (8x)
+    assert calls == [1.0 / (16.0 * 8.0)]
+
+    window.source.stop()
+
+
+def test_home_seeks_to_zero_resumes_and_sets_pause_label(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+
+    calls = []
+    window.source.seek = lambda idx: calls.append(('seek', idx))
+    window.source.resume = lambda: calls.append(('resume',))
+
+    window.play_pause_action.setText("Play")
+    window._is_playing = False
+
+    window._home()
+
+    assert calls == [('seek', 0), ('resume',)]
+    assert window.play_pause_action.text() == "Pause"
+    assert window._is_playing is True
+
+    window.source.stop()
+
+
+def test_speed_and_home_shortcuts_trigger_handlers(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+
+    calls = []
+    window.source.set_speed = lambda interval_s: calls.append('speed')
+    window.source.seek = lambda idx: calls.append('seek')
+    window.source.resume = lambda: calls.append('resume')
+
+    # See test_space_shortcut_toggles_play_pause for why show()+processEvents()
+    # is required before QShortcut (WindowShortcut context) will fire.
+    window.show()
+    QApplication.instance().processEvents()
+
+    QTest.keyClick(window, QtCoreQt.Key.Key_Up)
+    assert 'speed' in calls
+    calls.clear()
+
+    QTest.keyClick(window, QtCoreQt.Key.Key_Down)
+    assert 'speed' in calls
+    calls.clear()
+
+    QTest.keyClick(window, QtCoreQt.Key.Key_Home)
+    assert 'seek' in calls and 'resume' in calls
+
+    window.source.stop()
+
+
 def test_q_and_escape_close_the_window():
     window = MainWindow(AppConfig())
     closed = []

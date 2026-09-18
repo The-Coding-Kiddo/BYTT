@@ -286,6 +286,61 @@ def test_seek_clamps_out_of_range_input(tmp_path):
 
     source.stop()
 
+def test_set_speed_measurably_speeds_up_emission(tmp_path):
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(_build_bsf_bytes_n(n_pings=300))
+
+    received = []
+    source = PlaybackSource(str(bsf_path))  # default ~16 pings/sec
+    source.ping_received.connect(lambda port, stbd, meta: received.append(meta))
+    source.start()
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(received) < 1:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    assert len(received) >= 1
+
+    source.set_speed(0.001)
+    count_before = len(received)
+    window_deadline = time.time() + 0.5
+    while time.time() < window_deadline:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+
+    assert len(received) - count_before >= 20, (
+        "set_speed with a much shorter interval should allow far more than "
+        "the ~8 pings the default ~16/sec rate would produce in 0.5s"
+    )
+
+    source.stop()
+
+def test_set_speed_zero_does_not_crash_and_emits_rapidly(tmp_path):
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(_build_bsf_bytes_n(n_pings=300))
+
+    received = []
+    source = PlaybackSource(str(bsf_path))
+    source.ping_received.connect(lambda port, stbd, meta: received.append(meta))
+    source.start()
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline and len(received) < 1:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+    assert len(received) >= 1
+
+    source.set_speed(0.0)  # must not raise
+    count_before = len(received)
+    window_deadline = time.time() + 0.5
+    while time.time() < window_deadline:
+        QCoreApplication.processEvents()
+        time.sleep(0.005)
+
+    assert len(received) - count_before >= 20
+
+    source.stop()
+
 def test_controls_still_work_after_playback_reaches_end_of_file(tmp_path):
     bsf_path = tmp_path / "fixture.bsf"
     bsf_path.write_bytes(_build_bsf_bytes_n(n_pings=3))
