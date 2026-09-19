@@ -74,14 +74,8 @@ class WaterfallView(pg.GraphicsLayoutWidget):
         self._data_generation += 1
         self.raw_buffer = np.roll(self.raw_buffer, -1, axis=0)
         self.raw_buffer[-1] = raw_row_f32
-        row2d = raw_row_f32.reshape(1, -1)
-        img8, _target_mask, _shadow_mask = enhance_pixels(row2d, self._enhance_params)
-        row_uint8 = img8[0]
-        rgb_row = self._combined_lut[row_uint8]
-        self.image_buffer = np.roll(self.image_buffer, -1, axis=0)
-        self.image_buffer[-1] = rgb_row
         self.rows_written += 1
-        self._refresh()
+        self._submit_job()
 
     def set_enhance_params(self, params) -> None:
         self._enhance_params = params._replace(fast=self.live_mode)
