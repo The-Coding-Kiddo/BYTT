@@ -1,6 +1,7 @@
 /venv
 /env
-/docs	
+/docs
+/BYTT docs
 venve/
 *.bsf
 !tests/fixtures/*.bsf
