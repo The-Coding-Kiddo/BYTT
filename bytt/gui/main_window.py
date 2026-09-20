@@ -10,13 +10,6 @@ from bytt.net.live_client import LiveClient
 from bytt.net.command_client import CommandClient
 from bytt.net.playback_source import PlaybackSource
 from bytt.gui.waterfall_view import WaterfallView, build_display_row
-from bytt.processing.enhancement import EnhanceParams, enhance_pixels
-
-_DEFAULT_ENHANCE_PARAMS = EnhanceParams(
-    noise_idx=0, contrast_idx=0, agc=False, target_idx=0, target_ksize=9,
-    shadow_enh=False, overlay=0, sharpen=False, gain=1.0, gamma=1.0,
-    lut_idx=0, fast=True, hdr=False,
-)
 
 _SPEED_LABELS = ["1×", "2×", "4×", "8×", "16×", "32×", "MAX"]
 _SPEED_MULTIPLIERS = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, None]  # None = MAX (zero delay)
@@ -139,6 +132,7 @@ class MainWindow(QMainWindow):
     def connect_towfish(self, host: str, data_port: int, cmd_port: int) -> None:
         self.disconnect_source()
         self.source = LiveClient(host, data_port, parent=self)
+        self.waterfall.live_mode = True
         self._wire_source()
         self.source.start()
         try:
@@ -149,6 +143,7 @@ class MainWindow(QMainWindow):
     def open_playback_file(self, path: str) -> None:
         self.disconnect_source()
         self.source = PlaybackSource(path)
+        self.waterfall.live_mode = False
         self._wire_source()
         self.source.start()
 
@@ -253,12 +248,6 @@ class MainWindow(QMainWindow):
                 port_raw, stbd_raw, channel_w=channel_w,
                 port_on=True, stbd_on=True, gap=gap, interp_xs_cache=self._interp_cache,
             )
-            row_2d = row_f32.reshape(1, -1)
-            # enhance_pixels returns a 3-tuple (img8, target_mask, shadow_mask);
-            # img8 has shape (1, width) here, so row 0 is the 1D uint8 row
-            # add_row() expects.
-            img8, target_mask, shadow_mask = enhance_pixels(row_2d, _DEFAULT_ENHANCE_PARAMS)
-            row_u8 = img8[0]
-            self.waterfall.add_row(row_u8)
+            self.waterfall.add_row(row_f32)
         except Exception as e:
             self.statusBar().showMessage(f"ping display error: {e}")

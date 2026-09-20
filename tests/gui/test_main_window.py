@@ -63,6 +63,12 @@ def test_on_ping_received_reports_error_via_status_bar_on_malformed_input():
     assert window.statusBar().currentMessage() != ""
 
 
+def test_on_ping_received_no_longer_imports_enhance_pixels_directly():
+    import bytt.gui.main_window as mw_module
+    assert not hasattr(mw_module, "enhance_pixels")
+    assert not hasattr(mw_module, "_DEFAULT_ENHANCE_PARAMS")
+
+
 def test_close_event_disconnects_source_and_closes_command_client(tmp_path):
     from bytt.protocol import constants as pc
 
