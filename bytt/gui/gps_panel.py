@@ -12,25 +12,21 @@ from PySide6.QtWidgets import (
 _MPS_TO_KNOTS = 1.943844
 
 
-def _build_coverage_path(near_xs, near_ys, far_xs, far_ys) -> QPainterPath:
-    """One independent quad per step between consecutive fixes, rather than
-    a single shape spanning the whole track. A single connected shape
-    self-intersects wherever the boat turns or re-scans a spot -- and Qt's
-    default even-odd fill rule then treats double-covered area as OUTSIDE
-    the shape, which reads as "erased" rather than "scanned twice". Winding
-    fill on many small non-self-intersecting quads has no such failure
-    mode: overlapping quads just stack (a bit darker), which is correct."""
+def _build_coverage_path(quads) -> QPainterPath:
+    """One independent quad per track segment, rather than a single shape
+    spanning the whole track. A single connected shape self-intersects
+    wherever the boat turns or re-scans a spot -- and Qt's default even-odd
+    fill rule then treats double-covered area as OUTSIDE the shape, which
+    reads as "erased" rather than "scanned twice". Winding fill on many
+    small non-self-intersecting quads has no such failure mode: overlapping
+    quads just stack (a bit darker), which is correct.
+
+    quads: iterable of 4-point (x, y) lists, as GPSTrack.swath_quads()
+    yields for one side (port or starboard)."""
     path = QPainterPath()
     path.setFillRule(Qt.FillRule.WindingFill)
-    n = min(len(near_xs), len(far_xs))
-    for i in range(n - 1):
-        quad = QPolygonF([
-            QPointF(near_xs[i], near_ys[i]),
-            QPointF(near_xs[i + 1], near_ys[i + 1]),
-            QPointF(far_xs[i + 1], far_ys[i + 1]),
-            QPointF(far_xs[i], far_ys[i]),
-        ])
-        path.addPolygon(quad)
+    for quad in quads:
+        path.addPolygon(QPolygonF([QPointF(x, y) for x, y in quad]))
     return path
 
 
@@ -134,12 +130,12 @@ class GpsPanel(QDockWidget):
     def refresh(self, heading: float | None = None) -> None:
         track = self.gps_track
         self._track_curve.setData(track.xs, track.ys)
-        self._swath_port_patch.setPath(_build_coverage_path(
-            track.swath_port_near_xs, track.swath_port_near_ys,
-            track.swath_port_xs, track.swath_port_ys))
-        self._swath_stbd_patch.setPath(_build_coverage_path(
-            track.swath_stbd_near_xs, track.swath_stbd_near_ys,
-            track.swath_stbd_xs, track.swath_stbd_ys))
+        port_quads, stbd_quads = [], []
+        for port_quad, stbd_quad in track.swath_quads():
+            port_quads.append(port_quad)
+            stbd_quads.append(stbd_quad)
+        self._swath_port_patch.setPath(_build_coverage_path(port_quads))
+        self._swath_stbd_patch.setPath(_build_coverage_path(stbd_quads))
 
         if track.has_data:
             x, y = track.xs[-1], track.ys[-1]

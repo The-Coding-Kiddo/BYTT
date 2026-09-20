@@ -91,15 +91,15 @@ def test_swath_coverage_survives_a_revisited_corridor(owner):
     track = GPSTrack()
     lat, lon = 41.30, 36.33
     track.add_fix(0, lat, lon)
-    track.add_swath_edge(track.xs[-1], track.ys[-1], 0.0, 50.0, near_range_m=5.0)
+    track.add_swath_range(near_range_m=5.0, far_range_m=50.0)
     for i in range(1, 6):
         lat += 0.0005
         track.add_fix(i, lat, lon)
-        track.add_swath_edge(track.xs[-1], track.ys[-1], 0.0, 50.0, near_range_m=5.0)
+        track.add_swath_range(near_range_m=5.0, far_range_m=50.0)
     for i in range(6, 11):  # turn around, re-scan the same corridor
         lat -= 0.0005
         track.add_fix(i, lat, lon)
-        track.add_swath_edge(track.xs[-1], track.ys[-1], 180.0, 50.0, near_range_m=5.0)
+        track.add_swath_range(near_range_m=5.0, far_range_m=50.0)
 
     panel = GpsPanel(track, owner)
     panel.refresh()

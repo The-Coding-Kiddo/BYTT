@@ -42,18 +42,10 @@ class GPSTrack:
         self._next_waypoint_id = 1
         self.speed_mps = 0.0
         self._last_fix_time = None
-        # Outer (far) edge of the scanned strip on each side.
-        self.swath_port_xs = []
-        self.swath_port_ys = []
-        self.swath_stbd_xs = []
-        self.swath_stbd_ys = []
-        # Inner (near) edge -- the boundary of the nadir gap: the blind
-        # strip directly under and near the towfish where the water-column
-        # echo dominates and nothing useful reflects off the seabed yet.
-        self.swath_port_near_xs = []
-        self.swath_port_near_ys = []
-        self.swath_stbd_near_xs = []
-        self.swath_stbd_near_ys = []
+        # Near (nadir-gap) / far (usable-range) sonar reach in effect at
+        # each track point, in meters. Parallel to xs/ys.
+        self.swath_near_range_m = []
+        self.swath_far_range_m = []
 
     def _project(self, lat, lon):
         if self.ref_lat is None:
@@ -116,29 +108,56 @@ class GPSTrack:
             return None
         return self.xs[best], self.ys[best], self.ping_idx[best], best
 
-    def add_swath_edge(self, x, y, heading_deg, range_m, near_range_m=0.0):
-        """Records the port/starboard boundary of the strip of seafloor
-        actually scanned at this track point -- offset perpendicular to the
-        boat's heading by the sonar range on each side. (x, y) is a point
-        already in this track's local xy (e.g. xs[-1]/ys[-1] right after
-        add_fix). heading_deg is compass bearing, 0=N clockwise.
+    def add_swath_range(self, near_range_m, far_range_m):
+        """Records the near (nadir-gap) / far (usable-range) sonar reach in
+        effect for the most recently added fix. Call once per add_fix call.
 
-        near_range_m, if given, is the half-width of the nadir gap -- the
-        blind strip straddling the track where nothing useful reflects back
-        yet. Defaults to 0 (no gap), matching the original all-the-way-in
-        behavior."""
-        rad = math.radians(heading_deg)
-        # Starboard (right of the direction of travel) unit vector: rotate
-        # the heading direction (sin, cos) by +90 degrees.
-        sx, sy = math.cos(rad), -math.sin(rad)
-        self.swath_stbd_xs.append(x + sx * range_m)
-        self.swath_stbd_ys.append(y + sy * range_m)
-        self.swath_port_xs.append(x - sx * range_m)
-        self.swath_port_ys.append(y - sy * range_m)
-        self.swath_stbd_near_xs.append(x + sx * near_range_m)
-        self.swath_stbd_near_ys.append(y + sy * near_range_m)
-        self.swath_port_near_xs.append(x - sx * near_range_m)
-        self.swath_port_near_ys.append(y - sy * near_range_m)
+        Deliberately does NOT take a heading. An earlier version placed
+        each point's swath boundary using an externally-supplied heading
+        estimate (course-made-good in playback, since .bsf carries no real
+        heading) -- but a quad connecting point i to point i+1 then used
+        TWO DIFFERENT heading estimates, one per point, which could rotate
+        past the centerline and paint straight across the real nadir gap
+        whenever the course changed between them. swath_quads() below fixes
+        this by deriving direction from the track's own recorded positions
+        instead, which is unambiguous and needs no heading at all."""
+        self.swath_near_range_m.append(near_range_m)
+        self.swath_far_range_m.append(far_range_m)
+
+    def swath_quads(self):
+        """Yields (port_quad, stbd_quad) for each track segment -- each a
+        list of 4 (x, y) corners: near_i, near_{i+1}, far_{i+1}, far_i.
+
+        Both ends of a given quad are offset using that SAME segment's own
+        direction (the straight line between the two real recorded
+        positions), not any per-point heading estimate -- this is what
+        guarantees the quad can never rotate past the track's centerline,
+        regardless of how noisy an external heading estimate might be."""
+        n = min(len(self.xs), len(self.swath_near_range_m))
+        for i in range(n - 1):
+            x0, y0 = self.xs[i], self.ys[i]
+            x1, y1 = self.xs[i + 1], self.ys[i + 1]
+            dx, dy = x1 - x0, y1 - y0
+            length = math.hypot(dx, dy)
+            if length < 1e-9:
+                continue  # coincident points -- no meaningful direction, skip
+            ux, uy = dx / length, dy / length
+            sx, sy = uy, -ux  # starboard: travel direction rotated -90 degrees
+            near0, far0 = self.swath_near_range_m[i], self.swath_far_range_m[i]
+            near1, far1 = self.swath_near_range_m[i + 1], self.swath_far_range_m[i + 1]
+            stbd_quad = [
+                (x0 + sx * near0, y0 + sy * near0),
+                (x1 + sx * near1, y1 + sy * near1),
+                (x1 + sx * far1,  y1 + sy * far1),
+                (x0 + sx * far0,  y0 + sy * far0),
+            ]
+            port_quad = [
+                (x0 - sx * near0, y0 - sy * near0),
+                (x1 - sx * near1, y1 - sy * near1),
+                (x1 - sx * far1,  y1 - sy * far1),
+                (x0 - sx * far0,  y0 - sy * far0),
+            ]
+            yield port_quad, stbd_quad
 
     def add_waypoint(self, lat, lon, name=""):
         wp_id = self._next_waypoint_id

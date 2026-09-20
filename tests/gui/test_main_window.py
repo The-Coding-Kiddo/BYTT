@@ -2,7 +2,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 from PySide6.QtCore import Qt as QtCoreQt
-from bytt.gui.main_window import MainWindow
+from bytt.gui.main_window import MainWindow, NADIR_GAP_FRACTION
 from bytt.config import AppConfig
 
 @pytest.fixture(scope="module", autouse=True)
@@ -51,7 +51,12 @@ def test_disconnect_source_stops_recording_and_disables_action(tmp_path, monkeyp
     window.command_client.close()
 
 
-def test_ping_received_builds_swath_using_course_made_good_when_no_heading():
+def test_ping_received_records_swath_range_on_every_distinct_fix():
+    # Swath geometry no longer depends on heading at all -- it's derived
+    # from the track's own recorded positions (see GPSTrack.swath_quads).
+    # A single fix records a near/far range but can't yield a quad yet
+    # (a quad needs two points to have a direction); the second fix
+    # completes the first segment.
     window = MainWindow(AppConfig())
     import numpy as np
     port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
@@ -59,12 +64,13 @@ def test_ping_received_builds_swath_using_course_made_good_when_no_heading():
 
     meta1 = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': None, 'height': None}}
     window._on_ping_received(port_raw, stbd_raw, meta1)
-    assert window.gps_track.swath_port_xs == []  # no previous fix yet -- no heading derivable
+    assert len(window.gps_track.swath_near_range_m) == 1
+    assert list(window.gps_track.swath_quads()) == []
 
     meta2 = {'nav_fix': {'lat': 41.31, 'lon': 36.33, 'heading': None, 'height': None}}
     window._on_ping_received(port_raw, stbd_raw, meta2)
-    assert len(window.gps_track.swath_port_xs) == 1
-    assert len(window.gps_track.swath_stbd_xs) == 1
+    assert len(window.gps_track.swath_near_range_m) == 2
+    assert len(list(window.gps_track.swath_quads())) == 1
 
 
 def test_swath_uses_real_detected_edges_once_buffer_is_full(monkeypatch):
@@ -82,7 +88,29 @@ def test_swath_uses_real_detected_edges_once_buffer_is_full(monkeypatch):
     range_m = window._current_swath_range_m()
     channel_w = (window.waterfall.row_width - 8) // 2
     expected_far = 400 / channel_w * range_m
-    assert abs(window.gps_track.swath_stbd_xs[0] - expected_far) < 0.1
+    assert abs(window.gps_track.swath_far_range_m[0] - expected_far) < 0.1
+
+
+def test_near_edge_ignores_detector_even_when_far_edge_is_used(monkeypatch):
+    # Deliberate: the near-edge (nadir gap) detector was checked against a
+    # real recording and found unreliable (see _current_echo_range_m's
+    # docstring) -- it must keep using the documented fallback guess even
+    # when a detected near_idx IS available and the far edge does use
+    # detection. This locks that choice in so it can't silently regress.
+    window = MainWindow(AppConfig())
+    monkeypatch.setattr(
+        window.waterfall, "detect_channel_echo_edges",
+        lambda channel_w, gap, n_rows=200: {'port': (1, 400), 'stbd': (0, 400)})
+
+    import numpy as np
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+    meta = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': 0.0, 'height': None}}
+    window._on_ping_received(port_raw, stbd_raw, meta)
+
+    range_m = window._current_swath_range_m()
+    expected_near = range_m * NADIR_GAP_FRACTION  # the fallback, not the detector's ~0
+    assert abs(window.gps_track.swath_near_range_m[0] - expected_near) < 1e-6
 
 
 def test_swath_leaves_a_nadir_gap_using_fallback_fraction():
@@ -96,8 +124,8 @@ def test_swath_leaves_a_nadir_gap_using_fallback_fraction():
 
     range_m = window._current_swath_range_m()
     expected_near = range_m * 0.08
-    assert abs(window.gps_track.swath_stbd_near_xs[0] - expected_near) < 1e-6
-    assert window.gps_track.swath_stbd_near_xs[0] < window.gps_track.swath_stbd_xs[0]
+    assert abs(window.gps_track.swath_near_range_m[0] - expected_near) < 1e-6
+    assert window.gps_track.swath_near_range_m[0] < window.gps_track.swath_far_range_m[0]
 
 
 def test_swath_uses_reported_height_as_nadir_gap_when_available():
@@ -109,18 +137,7 @@ def test_swath_uses_reported_height_as_nadir_gap_when_available():
     meta = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': 0.0, 'height': 7.5}}
     window._on_ping_received(port_raw, stbd_raw, meta)
 
-    assert abs(window.gps_track.swath_stbd_near_xs[0] - 7.5) < 1e-6
-
-
-def test_ping_received_uses_real_heading_when_available():
-    window = MainWindow(AppConfig())
-    import numpy as np
-    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
-    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
-
-    meta = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': 90.0, 'height': None}}
-    window._on_ping_received(port_raw, stbd_raw, meta)
-    assert len(window.gps_track.swath_port_xs) == 1  # real heading -- no previous fix needed
+    assert abs(window.gps_track.swath_near_range_m[0] - 7.5) < 1e-6
 
 
 def test_data_indicator_turns_warning_after_no_data_timeout():

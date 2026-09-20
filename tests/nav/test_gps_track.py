@@ -28,36 +28,56 @@ def test_speed_computed_from_consecutive_fixes(monkeypatch):
     assert track.speed_mps > 0
     assert 10.0 < track.speed_mps < 12.0  # ~111.2m / 10s ≈ 11.12 m/s
 
-def test_swath_edge_perpendicular_to_heading_due_north():
+def test_swath_quads_use_segment_direction_not_external_heading():
     track = GPSTrack()
-    # Facing due north (heading=0), starboard is east (+x), port is west (-x).
-    track.add_swath_edge(x=0.0, y=0.0, heading_deg=0.0, range_m=50.0)
-    assert abs(track.swath_stbd_xs[0] - 50.0) < 1e-6
-    assert abs(track.swath_stbd_ys[0] - 0.0) < 1e-6
-    assert abs(track.swath_port_xs[0] - (-50.0)) < 1e-6
-    assert abs(track.swath_port_ys[0] - 0.0) < 1e-6
+    # Straight line due north: segment direction is unambiguous (0,0)->(0,10).
+    track.add_fix(0, 0.0, 0.0)
+    track.add_swath_range(near_range_m=5.0, far_range_m=50.0)
+    # add_fix's own projection is in meters already for this synthetic case
+    # (no real lat/lon math needed) -- push a second point directly.
+    track.xs.append(0.0)
+    track.ys.append(10.0)
+    track.ping_idx.append(1)
+    track.swath_near_range_m.append(5.0)
+    track.swath_far_range_m.append(50.0)
 
-def test_swath_edge_perpendicular_to_heading_due_east():
-    track = GPSTrack()
-    # Facing due east (heading=90), starboard is south (-y), port is north (+y).
-    track.add_swath_edge(x=0.0, y=0.0, heading_deg=90.0, range_m=50.0)
-    assert abs(track.swath_stbd_xs[0] - 0.0) < 1e-6
-    assert abs(track.swath_stbd_ys[0] - (-50.0)) < 1e-6
-    assert abs(track.swath_port_ys[0] - 50.0) < 1e-6
+    quads = list(track.swath_quads())
+    assert len(quads) == 1
+    port_quad, stbd_quad = quads[0]
+    # Facing due north (travel direction (0,10)), starboard is east (+x).
+    assert abs(stbd_quad[0][0] - 5.0) < 1e-6   # near0.x
+    assert abs(stbd_quad[0][1] - 0.0) < 1e-6   # near0.y
+    assert abs(stbd_quad[3][0] - 50.0) < 1e-6  # far0.x
+    assert abs(port_quad[0][0] - (-5.0)) < 1e-6
+    assert abs(port_quad[3][0] - (-50.0)) < 1e-6
 
-def test_swath_near_edge_defaults_to_zero_when_omitted():
-    track = GPSTrack()
-    track.add_swath_edge(x=0.0, y=0.0, heading_deg=0.0, range_m=50.0)
-    assert track.swath_stbd_near_xs[0] == 0.0
-    assert track.swath_port_near_xs[0] == 0.0
 
-def test_swath_near_edge_offset_due_north():
+def test_swath_quads_skip_coincident_points():
     track = GPSTrack()
-    track.add_swath_edge(x=0.0, y=0.0, heading_deg=0.0, range_m=50.0, near_range_m=5.0)
-    assert abs(track.swath_stbd_near_xs[0] - 5.0) < 1e-6
-    assert abs(track.swath_port_near_xs[0] - (-5.0)) < 1e-6
-    # far edge unaffected by near_range_m
-    assert abs(track.swath_stbd_xs[0] - 50.0) < 1e-6
+    track.xs = [0.0, 0.0]
+    track.ys = [0.0, 0.0]  # identical points -- no meaningful direction
+    track.swath_near_range_m = [5.0, 5.0]
+    track.swath_far_range_m = [50.0, 50.0]
+    assert list(track.swath_quads()) == []
+
+
+def test_swath_quads_stay_consistent_across_a_sharp_turn():
+    # The bug this replaces: a per-point heading estimate could rotate past
+    # the centerline between two points with very different courses,
+    # painting straight across the real nadir gap. Segment-direction quads
+    # must not do this -- every quad's own near boundary must stay strictly
+    # closer to that quad's own two track points than its far boundary.
+    track = GPSTrack()
+    track.xs = [0.0, 0.0, 10.0]
+    track.ys = [0.0, 10.0, 10.0]  # a 90-degree turn
+    track.swath_near_range_m = [5.0, 5.0, 5.0]
+    track.swath_far_range_m = [50.0, 50.0, 50.0]
+
+    quads = list(track.swath_quads())
+    assert len(quads) == 2  # one per segment: (0,0)->(0,10) and (0,10)->(10,10)
+    for port_quad, stbd_quad in quads:
+        assert len(port_quad) == 4
+        assert len(stbd_quad) == 4
 
 def test_add_and_remove_waypoint():
     track = GPSTrack()

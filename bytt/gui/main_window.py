@@ -12,7 +12,7 @@ from bytt.net.playback_source import PlaybackSource
 from bytt.gui.waterfall_view import WaterfallView, build_display_row
 from bytt.gui.controls_panel import ControlsPanel
 from bytt.gui.sonar_control_panel import SonarControlPanel
-from bytt.nav.gps_track import GPSTrack, bearing_deg
+from bytt.nav.gps_track import GPSTrack
 from bytt.gui.gps_panel import GpsPanel
 from bytt.net.recorder import Recorder
 from bytt.config import same_segment
@@ -359,40 +359,54 @@ class MainWindow(QMainWindow):
             ranges.append(p.lf_range.value())
         return max(ranges) if ranges else None
 
-    def _update_swath(self, prev_latlon, nav_fix) -> None:
-        heading = nav_fix.get('heading')
-        if heading is None and prev_latlon is not None:
-            # No real heading (playback has none; live heading is
-            # unverified against hardware) -- fall back to course made
-            # good: the bearing from the previous fix to this one.
-            heading = bearing_deg(prev_latlon[0], prev_latlon[1], nav_fix['lat'], nav_fix['lon'])
-        if heading is None:
-            return
+    def _update_swath(self, nav_fix) -> None:
+        # No heading needed here at all -- GPSTrack.swath_quads() derives
+        # direction from the track's own recorded positions (unambiguous
+        # ground truth), not from any external heading estimate. An earlier
+        # version used a per-point course-made-good heading, which could
+        # place adjacent quad corners using two different direction
+        # estimates and paint straight across the real nadir gap whenever
+        # the course changed between them.
         requested_range_m = self._current_swath_range_m()
         if requested_range_m is None:
             return
         near_range_m, far_range_m = self._current_echo_range_m(nav_fix, requested_range_m)
-        x, y = self.gps_track.xs[-1], self.gps_track.ys[-1]
-        self.gps_track.add_swath_edge(x, y, heading, far_range_m, near_range_m=near_range_m)
+        self.gps_track.add_swath_range(near_range_m, far_range_m)
 
     def _current_echo_range_m(self, nav_fix, requested_range_m):
-        """Prefers the real near/far echo edges measured from buffered ping
-        data (see WaterfallView.detect_channel_echo_edges) over guessing --
-        both the nadir-gap width and the usable range are backed by actual
-        amplitude behavior once enough pings have been buffered, not by
-        what we asked the sonar for or an unverified height field."""
+        """Far edge: prefers the real usable range measured from buffered
+        ping data (WaterfallView.detect_channel_echo_edges' mean/noise-floor
+        test) over the configured/requested range -- checked against a real
+        recording (samsun kayalık.bsf) and found credible: it measured a
+        real usable range of ~18-22m against a 50m dial setting, which is
+        the kind of answer you'd expect a real sonar to give.
+
+        Near edge (nadir gap): deliberately NOT using the detector's
+        variance-based near_edge_idx here, even though it's computed by the
+        same call. Checked against that same real recording and found NOT
+        credible -- real ping-to-ping variance in the actual near-range
+        region measured 0.055-0.25 throughout, never near the synthetic
+        threshold (0.01) it was tuned against, so it fired on sample 0-1
+        and collapsed the gap to a few centimeters. That threshold was only
+        validated against an artificially clean synthetic "flat near-zone";
+        real sensor data isn't that clean, and forcing a different number
+        to make one recording look right would be tuning to the test, not
+        fixing the method. Falls back to the documented guess
+        (_current_near_range_m) until the near-edge detector is properly
+        revalidated -- do not silently switch this back to the detected
+        value without doing that first."""
         gap = 8
         channel_w = (self.waterfall.row_width - gap) // 2
         edges = self.waterfall.detect_channel_echo_edges(channel_w, gap)
         detected = [e for e in (edges['port'], edges['stbd']) if e is not None]
+        near_m = self._current_near_range_m(nav_fix, requested_range_m)
         if detected:
             meters_per_sample = requested_range_m / channel_w
-            near_m = sum(d[0] for d in detected) / len(detected) * meters_per_sample
             far_m = sum(d[1] for d in detected) / len(detected) * meters_per_sample
             return near_m, far_m
-        # Not enough buffered history yet for a reliable measurement --
-        # fall back to the same guesses used before this was built.
-        return self._current_near_range_m(nav_fix, requested_range_m), requested_range_m
+        # Not enough buffered history yet for a reliable far-edge
+        # measurement either -- fall back to the requested range.
+        return near_m, requested_range_m
 
     def _current_near_range_m(self, nav_fix, range_m):
         height = nav_fix.get('height')
@@ -435,9 +449,8 @@ class MainWindow(QMainWindow):
                 self._latest_heading = nav_fix.get('heading')
                 latlon = (nav_fix['lat'], nav_fix['lon'])
                 if latlon != self.gps_track._last_latlon:
-                    prev_latlon = self.gps_track._last_latlon
                     self.gps_track.add_fix(self.waterfall.rows_written, nav_fix['lat'], nav_fix['lon'])
-                    self._update_swath(prev_latlon, nav_fix)
+                    self._update_swath(nav_fix)
                     self.gps_panel.refresh(heading=self._latest_heading)
         except Exception as e:
             self.statusBar().showMessage(f"ping display error: {e}")
