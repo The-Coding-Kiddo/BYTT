@@ -11,6 +11,7 @@ from bytt.net.command_client import CommandClient
 from bytt.net.playback_source import PlaybackSource
 from bytt.gui.waterfall_view import WaterfallView, build_display_row
 from bytt.gui.controls_panel import ControlsPanel
+from bytt.gui.sonar_control_panel import SonarControlPanel
 from bytt.nav.gps_track import GPSTrack
 from bytt.gui.gps_panel import GpsPanel
 from bytt.net.recorder import Recorder
@@ -62,8 +63,13 @@ class MainWindow(QMainWindow):
         self._port_on = True
         self._stbd_on = True
 
+        self.sonar_control_panel = SonarControlPanel(self)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.sonar_control_panel)
+        self.sonar_control_panel.apply_requested.connect(self._on_sonar_command_apply)
+
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.controls_panel.toggleViewAction())
+        view_menu.addAction(self.sonar_control_panel.toggleViewAction())
 
         self.gps_track = GPSTrack()
         self._latest_heading = None
@@ -152,6 +158,12 @@ class MainWindow(QMainWindow):
         self.command_client.close()
         self.recorder.stop()
         super().closeEvent(event)
+
+    def _on_sonar_command_apply(self, cmd) -> None:
+        try:
+            self.command_client.send_command(cmd)
+        except (RuntimeError, OSError) as e:
+            self.statusBar().showMessage(f"sonar command failed: {e}")
 
     def _on_no_data_timeout(self) -> None:
         self.statusBar().showMessage(

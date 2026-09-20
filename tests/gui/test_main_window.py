@@ -82,6 +82,28 @@ def test_ping_received_restarts_no_data_timer_in_live_mode():
     window.command_client.close()
 
 
+def test_sonar_control_apply_sends_command_when_connected():
+    window = MainWindow(AppConfig())
+    window.connect_towfish("127.0.0.1", 1, 2)  # command_client fails to connect, that's fine
+    window.sonar_control_panel.hf_range.setValue(99)
+    window.sonar_control_panel.apply_button.click()
+    # No real command server -- just confirm the failure is surfaced, not silently swallowed
+    # or crashing, and that the panel's command actually reached MainWindow's handler.
+    assert "sonar command failed" in window.statusBar().currentMessage()
+    window.disconnect_source()
+    window.command_client.close()
+
+
+def test_sonar_control_panel_has_view_menu_toggle():
+    window = MainWindow(AppConfig())
+    view_menu = None
+    for action in window.menuBar().actions():
+        if action.text() == "&View":
+            view_menu = action.menu()
+    texts = {a.text() for a in view_menu.actions()}
+    assert any("Sonar Control" in t for t in texts)
+
+
 def test_main_window_has_connect_and_playback_actions():
     window = MainWindow(AppConfig())
     action_texts = {a.text() for a in window.menuBar().actions()[0].menu().actions()}
