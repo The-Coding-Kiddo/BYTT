@@ -8,6 +8,25 @@ def format_degrees(value, pos_letter, neg_letter, decimals):
     return f"{abs(value):.{decimals}f}°{letter}"
 
 
+_EARTH_R_M = 6371000.0
+
+
+def haversine_distance_m(lat1, lon1, lat2, lon2):
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
+    return 2 * _EARTH_R_M * math.asin(min(1.0, math.sqrt(a)))
+
+
+def bearing_deg(lat1, lon1, lat2, lon2):
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dlambda = math.radians(lon2 - lon1)
+    y = math.sin(dlambda) * math.cos(p2)
+    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dlambda)
+    return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+
+
 class GPSTrack:
     EARTH_R_M = 6371000.0
 
@@ -18,6 +37,8 @@ class GPSTrack:
         self.xs        = []
         self.ys        = []
         self._last_latlon = None
+        self.waypoints = []  # [{'id', 'lat', 'lon', 'name'}, ...]
+        self._next_waypoint_id = 1
 
     def _project(self, lat, lon):
         if self.ref_lat is None:
@@ -65,6 +86,36 @@ class GPSTrack:
         if best is None:
             return None
         return self.xs[best], self.ys[best], self.ping_idx[best], best
+
+    def add_waypoint(self, lat, lon, name=""):
+        wp_id = self._next_waypoint_id
+        self._next_waypoint_id += 1
+        self.waypoints.append({'id': wp_id, 'lat': lat, 'lon': lon, 'name': name})
+        return wp_id
+
+    def remove_waypoint(self, wp_id):
+        self.waypoints = [w for w in self.waypoints if w['id'] != wp_id]
+
+    def waypoint_xy(self, wp_id):
+        """Projects a waypoint into the same local flat-earth xy the track uses."""
+        wp = next((w for w in self.waypoints if w['id'] == wp_id), None)
+        if wp is None:
+            return None
+        return self._project(wp['lat'], wp['lon'])
+
+    def bearing_distance_to_waypoint(self, wp_id):
+        """(distance_m, bearing_deg) from the current (last) position to the
+        given waypoint, or None if there is no current position or no such
+        waypoint."""
+        if self._last_latlon is None:
+            return None
+        wp = next((w for w in self.waypoints if w['id'] == wp_id), None)
+        if wp is None:
+            return None
+        lat0, lon0 = self._last_latlon
+        dist = haversine_distance_m(lat0, lon0, wp['lat'], wp['lon'])
+        brg = bearing_deg(lat0, lon0, wp['lat'], wp['lon'])
+        return dist, brg
 
     def history_upto(self, ping_idx):
         if not self.ping_idx:

@@ -1,7 +1,10 @@
 """Dockable GPS/nav track panel: plots the accumulated GPSTrack history,
-the current position, and (live mode only) a heading arrow."""
+the current position, (live mode only) a heading arrow, and waypoints with
+a live distance/bearing-from-current-position readout."""
 import pyqtgraph as pg
-from PySide6.QtWidgets import QDockWidget
+from PySide6.QtWidgets import (
+    QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget, QInputDialog,
+)
 
 
 class GpsPanel(QDockWidget):
@@ -19,6 +22,10 @@ class GpsPanel(QDockWidget):
             size=12, brush=pg.mkBrush(255, 200, 0), pen=pg.mkPen(None))
         self._plot.addItem(self._current_marker)
 
+        self._waypoint_scatter = pg.ScatterPlotItem(
+            size=14, symbol='d', brush=pg.mkBrush(60, 220, 100), pen=pg.mkPen('k'))
+        self._plot.addItem(self._waypoint_scatter)
+
         self._heading_arrow = pg.ArrowItem(angle=0, brush=pg.mkBrush(255, 60, 60))
         self._heading_visible = False
 
@@ -27,7 +34,24 @@ class GpsPanel(QDockWidget):
         self._x_axis.tickStrings = self._lon_tick_strings
         self._y_axis.tickStrings = self._lat_tick_strings
 
-        self.setWidget(self._plot_widget)
+        self.add_waypoint_button = QPushButton("Add Waypoint Here")
+        self.add_waypoint_button.clicked.connect(self._on_add_waypoint_clicked)
+        self.remove_waypoint_button = QPushButton("Remove Selected")
+        self.remove_waypoint_button.clicked.connect(self._on_remove_waypoint_clicked)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.add_waypoint_button)
+        buttons.addWidget(self.remove_waypoint_button)
+
+        self.waypoint_list = QListWidget()
+
+        body = QWidget(self)
+        layout = QVBoxLayout(body)
+        layout.addWidget(self._plot_widget)
+        layout.addLayout(buttons)
+        layout.addWidget(self.waypoint_list)
+        body.setLayout(layout)
+
+        self.setWidget(body)
 
     def _lon_tick_strings(self, values, scale, spacing):
         if self.gps_track.ref_lat is None:
@@ -46,6 +70,24 @@ class GpsPanel(QDockWidget):
             lat, _lon = self.gps_track.unproject(0.0, v)
             out.append(f"{lat:.5f}°")
         return out
+
+    def _on_add_waypoint_clicked(self) -> None:
+        if self.gps_track._last_latlon is None:
+            return
+        name, ok = QInputDialog.getText(self, "Add Waypoint", "Name:")
+        if not ok:
+            return
+        lat, lon = self.gps_track._last_latlon
+        self.gps_track.add_waypoint(lat, lon, name)
+        self.refresh()
+
+    def _on_remove_waypoint_clicked(self) -> None:
+        row = self.waypoint_list.currentRow()
+        if row < 0 or row >= len(self.gps_track.waypoints):
+            return
+        wp_id = self.gps_track.waypoints[row]['id']
+        self.gps_track.remove_waypoint(wp_id)
+        self.refresh()
 
     def refresh(self, heading: float | None = None) -> None:
         track = self.gps_track
@@ -71,3 +113,21 @@ class GpsPanel(QDockWidget):
             if self._heading_visible:
                 self._plot.removeItem(self._heading_arrow)
                 self._heading_visible = False
+
+        self._refresh_waypoints()
+
+    def _refresh_waypoints(self) -> None:
+        xs, ys = [], []
+        self.waypoint_list.clear()
+        for wp in self.gps_track.waypoints:
+            xy = self.gps_track.waypoint_xy(wp['id'])
+            if xy is not None:
+                xs.append(xy[0])
+                ys.append(xy[1])
+            label = wp['name'] or f"WP{wp['id']}"
+            bd = self.gps_track.bearing_distance_to_waypoint(wp['id'])
+            if bd is not None:
+                dist, brg = bd
+                label += f" — {dist:.0f} m @ {brg:.0f}°"
+            self.waypoint_list.addItem(label)
+        self._waypoint_scatter.setData(xs, ys)

@@ -1,5 +1,5 @@
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 from bytt.gui.gps_panel import GpsPanel
 from bytt.nav.gps_track import GPSTrack
 
@@ -8,17 +8,27 @@ def qt_app():
     app = QApplication.instance() or QApplication([])
     yield app
 
-def test_gps_panel_constructs_with_empty_track():
+@pytest.fixture
+def owner():
+    # Gives each panel a Qt-owned parent so teardown is deterministic
+    # (parentless top-level QDockWidgets built and dropped across many
+    # tests in one process is a known pyqtgraph GC/teardown hazard).
+    w = QWidget()
+    yield w
+    w.deleteLater()
+    QApplication.processEvents()
+
+def test_gps_panel_constructs_with_empty_track(owner):
     track = GPSTrack()
-    panel = GpsPanel(track)
+    panel = GpsPanel(track, owner)
     panel.refresh()  # must not raise on an empty track
 
 
-def test_gps_panel_refresh_updates_track_curve_data():
+def test_gps_panel_refresh_updates_track_curve_data(owner):
     track = GPSTrack()
     track.add_fix(0, 41.47, 36.13)
     track.add_fix(1, 41.48, 36.14)
-    panel = GpsPanel(track)
+    panel = GpsPanel(track, owner)
     panel.refresh()
 
     xs, ys = panel._track_curve.getData()
@@ -26,10 +36,10 @@ def test_gps_panel_refresh_updates_track_curve_data():
     assert len(ys) == 2
 
 
-def test_gps_panel_heading_arrow_shown_only_when_heading_given():
+def test_gps_panel_heading_arrow_shown_only_when_heading_given(owner):
     track = GPSTrack()
     track.add_fix(0, 41.47, 36.13)
-    panel = GpsPanel(track)
+    panel = GpsPanel(track, owner)
 
     panel.refresh(heading=None)
     assert not panel._heading_visible
@@ -39,3 +49,25 @@ def test_gps_panel_heading_arrow_shown_only_when_heading_given():
 
     panel.refresh(heading=None)
     assert not panel._heading_visible
+
+
+def test_add_waypoint_and_it_appears_in_the_list(owner):
+    track = GPSTrack()
+    track.add_fix(0, 41.47, 36.13)
+    panel = GpsPanel(track, owner)
+    track.add_waypoint(41.48, 36.14, "wreck")
+    panel.refresh()
+    assert panel.waypoint_list.count() == 1
+    assert "wreck" in panel.waypoint_list.item(0).text()
+
+
+def test_remove_selected_waypoint(owner):
+    track = GPSTrack()
+    track.add_fix(0, 41.47, 36.13)
+    panel = GpsPanel(track, owner)
+    track.add_waypoint(41.48, 36.14, "wreck")
+    panel.refresh()
+    panel.waypoint_list.setCurrentRow(0)
+    panel._on_remove_waypoint_clicked()
+    assert track.waypoints == []
+    assert panel.waypoint_list.count() == 0
