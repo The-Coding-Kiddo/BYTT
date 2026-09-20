@@ -47,10 +47,13 @@ class GpsPanel(QDockWidget):
         buttons.addWidget(self.remove_waypoint_button)
 
         self.waypoint_list = QListWidget()
+        # A handful of rows' worth -- the plot is the point of this panel,
+        # the waypoint list is a small side reference, not a peer.
+        self.waypoint_list.setMaximumHeight(90)
 
         body = QWidget(self)
         layout = QVBoxLayout(body)
-        layout.addWidget(self._plot_widget)
+        layout.addWidget(self._plot_widget, 1)  # stretch factor: plot claims all extra space
         layout.addWidget(self.speed_heading_label)
         layout.addLayout(buttons)
         layout.addWidget(self.waypoint_list)
