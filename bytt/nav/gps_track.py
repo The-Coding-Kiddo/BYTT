@@ -124,39 +124,75 @@ class GPSTrack:
         self.swath_near_range_m.append(near_range_m)
         self.swath_far_range_m.append(far_range_m)
 
+    def _swath_point_direction(self, i, n):
+        """Unit travel direction AT point i, as the average of the incoming
+        segment (i-1 -> i) and outgoing segment (i -> i+1) directions --
+        the standard line-join technique (a miter join). This is what lets
+        the quad ending at point i and the quad starting at it agree on
+        exactly where i's near/far corners are.
+
+        An earlier version gave each quad its own segment's direction
+        independently, with no such agreement -- fine on a straight line,
+        but on a turn the two quads meeting at a shared point used two
+        different directions, and since the far edge is much farther from
+        the track than the near edge, that same angular gap opens into a
+        visibly wide wedge cut out at the far edge, worst exactly where the
+        boat turns sharpest. Returns None only if no direction at all can
+        be determined (a single isolated point)."""
+        vecs = []
+        if i > 0:
+            dx, dy = self.xs[i] - self.xs[i - 1], self.ys[i] - self.ys[i - 1]
+            length = math.hypot(dx, dy)
+            if length > 1e-9:
+                vecs.append((dx / length, dy / length))
+        if i < n - 1:
+            dx, dy = self.xs[i + 1] - self.xs[i], self.ys[i + 1] - self.ys[i]
+            length = math.hypot(dx, dy)
+            if length > 1e-9:
+                vecs.append((dx / length, dy / length))
+        if not vecs:
+            return None
+        ux = sum(v[0] for v in vecs) / len(vecs)
+        uy = sum(v[1] for v in vecs) / len(vecs)
+        norm = math.hypot(ux, uy)
+        if norm < 1e-9:
+            # The two segments point in very nearly opposite directions (a
+            # near-180-degree reversal) -- their average cancels out, so
+            # there's no well-defined single direction. Fall back to
+            # whichever single segment is available rather than a
+            # degenerate zero vector.
+            return vecs[-1]
+        return ux / norm, uy / norm
+
     def swath_quads(self):
         """Yields (port_quad, stbd_quad) for each track segment -- each a
         list of 4 (x, y) corners: near_i, near_{i+1}, far_{i+1}, far_i.
 
-        Both ends of a given quad are offset using that SAME segment's own
-        direction (the straight line between the two real recorded
-        positions), not any per-point heading estimate -- this is what
-        guarantees the quad can never rotate past the track's centerline,
-        regardless of how noisy an external heading estimate might be."""
+        Both endpoints of a segment use that POINT's own shared direction
+        (see _swath_point_direction), not the segment's direction -- this
+        is what lets neighboring quads share exact corner points instead of
+        leaving a wedge-shaped gap between them at every turn."""
         n = min(len(self.xs), len(self.swath_near_range_m))
+        corners = [None] * n
+        for i in range(n):
+            d = self._swath_point_direction(i, n)
+            if d is None:
+                continue
+            sx, sy = d[1], -d[0]  # starboard: travel direction rotated -90 degrees
+            x, y = self.xs[i], self.ys[i]
+            near_m, far_m = self.swath_near_range_m[i], self.swath_far_range_m[i]
+            corners[i] = {
+                'stbd_near': (x + sx * near_m, y + sy * near_m),
+                'stbd_far':  (x + sx * far_m,  y + sy * far_m),
+                'port_near': (x - sx * near_m, y - sy * near_m),
+                'port_far':  (x - sx * far_m,  y - sy * far_m),
+            }
         for i in range(n - 1):
-            x0, y0 = self.xs[i], self.ys[i]
-            x1, y1 = self.xs[i + 1], self.ys[i + 1]
-            dx, dy = x1 - x0, y1 - y0
-            length = math.hypot(dx, dy)
-            if length < 1e-9:
-                continue  # coincident points -- no meaningful direction, skip
-            ux, uy = dx / length, dy / length
-            sx, sy = uy, -ux  # starboard: travel direction rotated -90 degrees
-            near0, far0 = self.swath_near_range_m[i], self.swath_far_range_m[i]
-            near1, far1 = self.swath_near_range_m[i + 1], self.swath_far_range_m[i + 1]
-            stbd_quad = [
-                (x0 + sx * near0, y0 + sy * near0),
-                (x1 + sx * near1, y1 + sy * near1),
-                (x1 + sx * far1,  y1 + sy * far1),
-                (x0 + sx * far0,  y0 + sy * far0),
-            ]
-            port_quad = [
-                (x0 - sx * near0, y0 - sy * near0),
-                (x1 - sx * near1, y1 - sy * near1),
-                (x1 - sx * far1,  y1 - sy * far1),
-                (x0 - sx * far0,  y0 - sy * far0),
-            ]
+            c0, c1 = corners[i], corners[i + 1]
+            if c0 is None or c1 is None:
+                continue
+            stbd_quad = [c0['stbd_near'], c1['stbd_near'], c1['stbd_far'], c0['stbd_far']]
+            port_quad = [c0['port_near'], c1['port_near'], c1['port_far'], c0['port_far']]
             yield port_quad, stbd_quad
 
     def add_waypoint(self, lat, lon, name=""):

@@ -79,6 +79,34 @@ def test_swath_quads_stay_consistent_across_a_sharp_turn():
         assert len(port_quad) == 4
         assert len(stbd_quad) == 4
 
+
+def test_swath_quads_share_corners_at_a_turn_no_wedge_gap():
+    # Regression test for a real visual bug: earlier, each quad computed
+    # its own corners from its own segment's direction only, so the quad
+    # ending at a turn point and the quad starting from it disagreed on
+    # where that point's corners were -- opening a wedge-shaped gap at the
+    # far edge, worse the sharper the turn. With a shared per-point
+    # direction (miter join), the quad before a turn and the quad after it
+    # must end/start at the EXACT same corner coordinates.
+    track = GPSTrack()
+    track.xs = [0.0, 0.0, 10.0]
+    track.ys = [0.0, 10.0, 10.0]  # a 90-degree turn at point 1
+    track.swath_near_range_m = [5.0, 5.0, 5.0]
+    track.swath_far_range_m = [50.0, 50.0, 50.0]
+
+    quads = list(track.swath_quads())
+    assert len(quads) == 2
+    (port_q0, stbd_q0), (port_q1, stbd_q1) = quads
+    # quad0's corner at point 1 is its 2nd/3rd vertices (near_1, far_1);
+    # quad1's corner at point 1 is its 1st/4th vertices (near_1, far_1).
+    # They must be identical, not just close, since both are supposed to
+    # be reading the exact same precomputed corner for point 1.
+    assert port_q0[1] == port_q1[0]  # port near_1
+    assert port_q0[2] == port_q1[3]  # port far_1
+    assert stbd_q0[1] == stbd_q1[0]  # stbd near_1
+    assert stbd_q0[2] == stbd_q1[3]  # stbd far_1
+
+
 def test_add_and_remove_waypoint():
     track = GPSTrack()
     wp_id = track.add_waypoint(41.5, 36.2, "wreck")
