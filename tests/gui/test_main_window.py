@@ -95,6 +95,36 @@ def test_swath_quad_appears_once_far_range_is_actually_measured(monkeypatch):
     assert len(list(window.gps_track.swath_quads())) == 1
 
 
+def test_swath_prefers_pings_own_reported_range_over_panel_setting(monkeypatch):
+    # The panel's configured range is only what we'd ASK the sonar to do.
+    # The ping's own max_range_m (real for live, and now computed from the
+    # file header for playback) is what it actually reported -- must be
+    # used as the meters-per-sample scale in preference to the panel value.
+    window = MainWindow(AppConfig())
+    captured_channel_w = {}
+    def fake_detect(channel_w, gap, n_rows=200):
+        captured_channel_w['value'] = channel_w
+        return {'port': (10, 400), 'stbd': (10, 400)}
+    monkeypatch.setattr(window.waterfall, "detect_channel_echo_edges", fake_detect)
+
+    import numpy as np
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+    # Panel defaults to 50m; the ping itself reports a very different 17.5m
+    # (the real figure from the 20250530_093513.bsf recording).
+    meta1 = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': None, 'height': None},
+             'max_range_m': 17.5}
+    window._on_ping_received(port_raw, stbd_raw, meta1)
+    meta2 = {'nav_fix': {'lat': 41.31, 'lon': 36.33, 'heading': None, 'height': None},
+             'max_range_m': 17.5}
+    window._on_ping_received(port_raw, stbd_raw, meta2)
+
+    channel_w = captured_channel_w['value']
+    expected_far = 400 / channel_w * 17.5
+    assert abs(window.gps_track.swath_far_range_m[0] - expected_far) < 0.01
+    assert window._current_swath_range_m() == 50  # confirms the panel value was NOT what was used
+
+
 def test_swath_uses_real_detected_edges_once_buffer_is_full(monkeypatch):
     window = MainWindow(AppConfig())
     monkeypatch.setattr(

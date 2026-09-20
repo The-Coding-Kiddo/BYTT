@@ -359,7 +359,7 @@ class MainWindow(QMainWindow):
             ranges.append(p.lf_range.value())
         return max(ranges) if ranges else None
 
-    def _update_swath(self, nav_fix) -> None:
+    def _update_swath(self, nav_fix, ping_range_m) -> None:
         # No heading needed here at all -- GPSTrack.swath_quads() derives
         # direction from the track's own recorded positions (unambiguous
         # ground truth), not from any external heading estimate. An earlier
@@ -367,22 +367,33 @@ class MainWindow(QMainWindow):
         # place adjacent quad corners using two different direction
         # estimates and paint straight across the real nadir gap whenever
         # the course changed between them.
-        requested_range_m = self._current_swath_range_m()
-        if requested_range_m is None:
+        #
+        # ping_range_m is the ping's OWN reported range -- real for live
+        # (parse_3101_body's sonar_range_cm) and, since this session, real
+        # for playback too (compute_bsf_range_m, derived from the file's
+        # sound_speed and the ping's own sample count/rate -- a physics
+        # calculation, not a guess). Prefer it over the Sonar Control
+        # Panel's requested value, which is only what we'd ASK the sonar
+        # to do, not what it actually did for this specific ping.
+        basis_range_m = ping_range_m if ping_range_m is not None else self._current_swath_range_m()
+        if basis_range_m is None:
             return
-        near_range_m, far_range_m = self._current_echo_range_m(nav_fix, requested_range_m)
+        near_range_m, far_range_m = self._current_echo_range_m(nav_fix, basis_range_m)
         # far_range_m is None when it hasn't actually been measured yet --
         # GPSTrack still records a slot (keeping it positionally aligned
         # with xs/ys) but draws no coverage for this point until it's earned.
         self.gps_track.add_swath_range(near_range_m, far_range_m)
 
-    def _current_echo_range_m(self, nav_fix, requested_range_m):
+    def _current_echo_range_m(self, nav_fix, basis_range_m):
         """Far edge: prefers the real usable range measured from buffered
         ping data (WaterfallView.detect_channel_echo_edges' mean/noise-floor
-        test) over the configured/requested range -- checked against a real
-        recording (samsun kayalık.bsf) and found credible: it measured a
-        real usable range of ~18-22m against a 50m dial setting, which is
-        the kind of answer you'd expect a real sonar to give.
+        test) over basis_range_m -- checked against a real recording
+        (samsun kayalık.bsf) and found credible: it measured a real usable
+        range of ~18-22m against a 50m dial setting, which is the kind of
+        answer you'd expect a real sonar to give. basis_range_m only sets
+        the meters-per-sample scale for that measurement (see _update_swath
+        for what it actually is) and is itself used directly whenever
+        there's not yet enough buffered data for the detector.
 
         Near edge (nadir gap): deliberately NOT using the detector's
         variance-based near_edge_idx here, even though it's computed by the
@@ -402,9 +413,9 @@ class MainWindow(QMainWindow):
         channel_w = (self.waterfall.row_width - gap) // 2
         edges = self.waterfall.detect_channel_echo_edges(channel_w, gap)
         detected = [e for e in (edges['port'], edges['stbd']) if e is not None]
-        near_m = self._current_near_range_m(nav_fix, requested_range_m)
+        near_m = self._current_near_range_m(nav_fix, basis_range_m)
         if detected:
-            meters_per_sample = requested_range_m / channel_w
+            meters_per_sample = basis_range_m / channel_w
             far_m = sum(d[1] for d in detected) / len(detected) * meters_per_sample
             return near_m, far_m
         # Not enough buffered history yet for a reliable far-edge
@@ -463,7 +474,7 @@ class MainWindow(QMainWindow):
                 latlon = (nav_fix['lat'], nav_fix['lon'])
                 if latlon != self.gps_track._last_latlon:
                     self.gps_track.add_fix(self.waterfall.rows_written, nav_fix['lat'], nav_fix['lon'])
-                    self._update_swath(nav_fix)
+                    self._update_swath(nav_fix, meta.get('max_range_m'))
                     self.gps_panel.refresh(heading=self._latest_heading)
         except Exception as e:
             self.statusBar().showMessage(f"ping display error: {e}")
