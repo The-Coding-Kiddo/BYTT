@@ -3,7 +3,7 @@ source (LiveClient or PlaybackSource) is active to the waterfall display."""
 from PySide6.QtWidgets import (
     QMainWindow, QFileDialog, QInputDialog, QToolBar, QLabel, QSlider,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QShortcut, QKeySequence
 from bytt.config import AppConfig
 from bytt.net.live_client import LiveClient
@@ -14,6 +14,9 @@ from bytt.gui.controls_panel import ControlsPanel
 from bytt.nav.gps_track import GPSTrack
 from bytt.gui.gps_panel import GpsPanel
 from bytt.net.recorder import Recorder
+from bytt.config import same_segment
+
+NO_DATA_WARNING_MS = 5000  # how long a live connection can go silent before we warn
 
 _SPEED_LABELS = ["1×", "2×", "4×", "8×", "16×", "32×", "MAX"]
 _SPEED_MULTIPLIERS = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, None]  # None = MAX (zero delay)
@@ -138,6 +141,10 @@ class MainWindow(QMainWindow):
         self._home_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Home), self)
         self._home_shortcut.activated.connect(self._home)
 
+        self._no_data_timer = QTimer(self)
+        self._no_data_timer.setSingleShot(True)
+        self._no_data_timer.timeout.connect(self._on_no_data_timeout)
+
         self.statusBar().showMessage("disconnected")
 
     def closeEvent(self, event):
@@ -145,6 +152,10 @@ class MainWindow(QMainWindow):
         self.command_client.close()
         self.recorder.stop()
         super().closeEvent(event)
+
+    def _on_no_data_timeout(self) -> None:
+        self.statusBar().showMessage(
+            "connected but no data received — check sonar power/link")
 
     def _on_record_toggled(self, checked: bool) -> None:
         if checked:
@@ -177,10 +188,15 @@ class MainWindow(QMainWindow):
         self.source.raw_packet_received.connect(self.recorder.write_packet)
         self.record_action.setEnabled(True)
         self.source.start()
+        self._no_data_timer.start(NO_DATA_WARNING_MS)
         try:
             self.command_client.connect_to(host, cmd_port)
         except OSError as e:
             self.statusBar().showMessage(f"command channel failed: {e}")
+        if self.config.pc_ip and not same_segment(host, self.config.pc_ip):
+            self.statusBar().showMessage(
+                f"warning: towfish {host} and this PC {self.config.pc_ip} "
+                f"are not on the same network segment")
 
     def open_playback_file(self, path: str) -> None:
         self.disconnect_source()
@@ -200,6 +216,7 @@ class MainWindow(QMainWindow):
         self.recorder.stop()
         self.record_action.setChecked(False)
         self.record_action.setEnabled(False)
+        self._no_data_timer.stop()
         self.playback_toolbar.setVisible(False)
         self._is_playing = False
 
@@ -290,6 +307,8 @@ class MainWindow(QMainWindow):
         self._stbd_on = stbd_on
 
     def _on_ping_received(self, port_raw, stbd_raw, meta) -> None:
+        if self.waterfall.live_mode:
+            self._no_data_timer.start(NO_DATA_WARNING_MS)
         # build_display_row interpolates EACH channel to channel_w samples,
         # then concatenates them with a gap in between, so the resulting row
         # length is 2*channel_w + gap. Solve for channel_w so that total

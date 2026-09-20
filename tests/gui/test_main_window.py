@@ -51,6 +51,37 @@ def test_disconnect_source_stops_recording_and_disables_action(tmp_path, monkeyp
     window.command_client.close()
 
 
+def test_connect_towfish_warns_on_segment_mismatch():
+    config = AppConfig(pc_ip="10.0.0.5")  # different /24 than the default towfish_ip
+    window = MainWindow(config)
+    window.connect_towfish("192.168.1.16", 1, 2)
+    assert "not on the same network segment" in window.statusBar().currentMessage()
+    window.disconnect_source()
+    window.command_client.close()
+
+
+def test_no_data_timer_fires_warning_after_silence():
+    window = MainWindow(AppConfig())
+    window.connect_towfish("127.0.0.1", 1, 2)
+    window._on_no_data_timeout()  # simulate the timer firing directly, no real 5s wait
+    assert "no data received" in window.statusBar().currentMessage()
+    window.disconnect_source()
+    window.command_client.close()
+
+
+def test_ping_received_restarts_no_data_timer_in_live_mode():
+    window = MainWindow(AppConfig())
+    window.connect_towfish("127.0.0.1", 1, 2)
+    window._no_data_timer.stop()
+    import numpy as np
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+    window._on_ping_received(port_raw, stbd_raw, {})
+    assert window._no_data_timer.isActive()
+    window.disconnect_source()
+    window.command_client.close()
+
+
 def test_main_window_has_connect_and_playback_actions():
     window = MainWindow(AppConfig())
     action_texts = {a.text() for a in window.menuBar().actions()[0].menu().actions()}
