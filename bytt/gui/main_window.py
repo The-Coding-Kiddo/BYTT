@@ -153,6 +153,7 @@ class MainWindow(QMainWindow):
         self.gps_track = GPSTrack()
         self._latest_heading = None
         self.gps_panel.gps_track = self.gps_track
+        self.gps_panel.refresh()
         self.source = LiveClient(host, data_port, parent=self)
         self.waterfall.live_mode = True
         self._wire_source()
@@ -167,6 +168,7 @@ class MainWindow(QMainWindow):
         self.gps_track = GPSTrack()
         self._latest_heading = None
         self.gps_panel.gps_track = self.gps_track
+        self.gps_panel.refresh()
         self.source = PlaybackSource(path)
         self.waterfall.live_mode = False
         self._wire_source()
@@ -282,8 +284,10 @@ class MainWindow(QMainWindow):
 
             nav_fix = meta.get('nav_fix')
             if nav_fix is not None:
-                self.gps_track.add_fix(self.waterfall.rows_written, nav_fix['lat'], nav_fix['lon'])
                 self._latest_heading = nav_fix.get('heading')
-                self.gps_panel.refresh(heading=self._latest_heading)
+                latlon = (nav_fix['lat'], nav_fix['lon'])
+                if latlon != self.gps_track._last_latlon:
+                    self.gps_track.add_fix(self.waterfall.rows_written, nav_fix['lat'], nav_fix['lon'])
+                    self.gps_panel.refresh(heading=self._latest_heading)
         except Exception as e:
             self.statusBar().showMessage(f"ping display error: {e}")

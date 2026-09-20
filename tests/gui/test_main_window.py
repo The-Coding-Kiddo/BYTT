@@ -475,6 +475,44 @@ def test_on_ping_received_with_no_nav_fix_does_not_touch_gps_track():
     assert not window.gps_track.has_data
 
 
+def test_open_playback_file_clears_stale_gps_panel_display(tmp_path):
+    import numpy as np
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))  # header-only: 0 pings, exercises the path safely
+
+    window = MainWindow(AppConfig())
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+    meta = {'nav_fix': {'lat': 41.47, 'lon': 36.13, 'heading': 90.0, 'height': 5.0}}
+    window._on_ping_received(port_raw, stbd_raw, meta)
+    assert window.gps_panel._track_curve.getData()[0] is not None
+    assert len(window.gps_panel._track_curve.getData()[0]) == 1
+
+    window.open_playback_file(str(bsf_path))
+    xs, ys = window.gps_panel._track_curve.getData()
+    assert xs is None or len(xs) == 0
+    assert ys is None or len(ys) == 0
+    window.source.stop()
+
+
+def test_on_ping_received_does_not_readd_unchanged_nav_fix():
+    import numpy as np
+    window = MainWindow(AppConfig())
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+
+    meta = {'nav_fix': {'lat': 41.47, 'lon': 36.13, 'heading': 90.0, 'height': 5.0}}
+    window._on_ping_received(port_raw, stbd_raw, meta)
+    window._on_ping_received(port_raw, stbd_raw, meta)
+    assert len(window.gps_track.xs) == 1
+
+    meta2 = {'nav_fix': {'lat': 41.48, 'lon': 36.14, 'heading': 91.0, 'height': 5.0}}
+    window._on_ping_received(port_raw, stbd_raw, meta2)
+    assert len(window.gps_track.xs) == 2
+
+
 def test_view_menu_has_gps_panel_toggle():
     window = MainWindow(AppConfig())
     view_menu = None
