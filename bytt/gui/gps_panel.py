@@ -19,10 +19,16 @@ class GpsPanel(QDockWidget):
         self._plot.setAspectLocked(True)
         self._plot.showGrid(x=True, y=True, alpha=0.3)
 
-        self._track_curve = self._plot.plot([], [], pen=pg.mkPen((80, 160, 255), width=2))
-        swath_pen = pg.mkPen((120, 120, 120), width=1, style=pg.QtCore.Qt.PenStyle.DashLine)
+        swath_pen = pg.mkPen((90, 170, 220), width=1)
         self._swath_port_curve = self._plot.plot([], [], pen=swath_pen)
         self._swath_stbd_curve = self._plot.plot([], [], pen=swath_pen)
+        # A translucent fill between the two boundary curves reads as an
+        # actual coverage strip, not just two more thin lines next to the
+        # track -- two dashed lines alone were too subtle to notice.
+        self._swath_fill = pg.FillBetweenItem(
+            self._swath_port_curve, self._swath_stbd_curve, brush=pg.mkBrush(90, 170, 220, 60))
+        self._plot.addItem(self._swath_fill)
+        self._track_curve = self._plot.plot([], [], pen=pg.mkPen((80, 160, 255), width=2))
         self._current_marker = pg.ScatterPlotItem(
             size=12, brush=pg.mkBrush(255, 200, 0), pen=pg.mkPen(None))
         self._plot.addItem(self._current_marker)
