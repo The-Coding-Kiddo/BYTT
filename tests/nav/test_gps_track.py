@@ -52,6 +52,29 @@ def test_swath_quads_use_segment_direction_not_external_heading():
     assert abs(port_quad[3][0] - (-50.0)) < 1e-6
 
 
+def test_swath_quads_skip_points_with_unmeasured_range():
+    # A None far_range_m (recorded when the caller's detector hasn't
+    # measured a real value yet) must produce no coverage for that point,
+    # not fall back to drawing something using whatever range happened to
+    # be in effect for a neighboring point.
+    track = GPSTrack()
+    track.xs = [0.0, 0.0, 0.0]
+    track.ys = [0.0, 10.0, 20.0]
+    track.swath_near_range_m = [5.0, None, 5.0]
+    track.swath_far_range_m = [None, None, 50.0]
+    assert list(track.swath_quads()) == []  # no segment has both ends measured
+
+
+def test_swath_quads_draws_once_range_becomes_available():
+    track = GPSTrack()
+    track.xs = [0.0, 0.0, 0.0]
+    track.ys = [0.0, 10.0, 20.0]
+    track.swath_near_range_m = [None, 5.0, 5.0]
+    track.swath_far_range_m = [None, 40.0, 40.0]
+    quads = list(track.swath_quads())
+    assert len(quads) == 1  # only the segment between points 1 and 2
+
+
 def test_swath_quads_skip_coincident_points():
     track = GPSTrack()
     track.xs = [0.0, 0.0]

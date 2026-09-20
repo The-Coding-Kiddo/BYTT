@@ -110,7 +110,14 @@ class GPSTrack:
 
     def add_swath_range(self, near_range_m, far_range_m):
         """Records the near (nadir-gap) / far (usable-range) sonar reach in
-        effect for the most recently added fix. Call once per add_fix call.
+        effect for the most recently added fix. Call once per add_fix call
+        to keep this list positionally aligned with xs/ys.
+
+        far_range_m (or near_range_m) may be None when it hasn't actually
+        been measured for this fix yet (e.g. the caller's own detector
+        needs more buffered data first) -- swath_quads() then draws no
+        coverage for this point rather than assuming the full configured
+        range was reached before that's been checked.
 
         Deliberately does NOT take a heading. An earlier version placed
         each point's swath boundary using an externally-supplied heading
@@ -175,12 +182,14 @@ class GPSTrack:
         n = min(len(self.xs), len(self.swath_near_range_m))
         corners = [None] * n
         for i in range(n):
+            near_m, far_m = self.swath_near_range_m[i], self.swath_far_range_m[i]
+            if near_m is None or far_m is None:
+                continue  # not measured yet for this point -- no coverage claim
             d = self._swath_point_direction(i, n)
             if d is None:
                 continue
             sx, sy = d[1], -d[0]  # starboard: travel direction rotated -90 degrees
             x, y = self.xs[i], self.ys[i]
-            near_m, far_m = self.swath_near_range_m[i], self.swath_far_range_m[i]
             corners[i] = {
                 'stbd_near': (x + sx * near_m, y + sy * near_m),
                 'stbd_far':  (x + sx * far_m,  y + sy * far_m),

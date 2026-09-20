@@ -51,12 +51,14 @@ def test_disconnect_source_stops_recording_and_disables_action(tmp_path, monkeyp
     window.command_client.close()
 
 
-def test_ping_received_records_swath_range_on_every_distinct_fix():
+def test_ping_received_records_swath_slot_but_no_quad_until_far_range_is_measured():
     # Swath geometry no longer depends on heading at all -- it's derived
     # from the track's own recorded positions (see GPSTrack.swath_quads).
-    # A single fix records a near/far range but can't yield a quad yet
-    # (a quad needs two points to have a direction); the second fix
-    # completes the first segment.
+    # A fresh window has no buffered ping history yet, so the far edge is
+    # never measured -- every fix still gets a positionally-aligned slot
+    # (near_range_m recorded, far_range_m None), but that must never yield
+    # a drawn quad: an unearned "we scanned out to the full requested
+    # range" claim is worse than no claim at all (see _current_echo_range_m).
     window = MainWindow(AppConfig())
     import numpy as np
     port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
@@ -65,11 +67,31 @@ def test_ping_received_records_swath_range_on_every_distinct_fix():
     meta1 = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': None, 'height': None}}
     window._on_ping_received(port_raw, stbd_raw, meta1)
     assert len(window.gps_track.swath_near_range_m) == 1
+    assert window.gps_track.swath_far_range_m[0] is None
     assert list(window.gps_track.swath_quads()) == []
 
     meta2 = {'nav_fix': {'lat': 41.31, 'lon': 36.33, 'heading': None, 'height': None}}
     window._on_ping_received(port_raw, stbd_raw, meta2)
     assert len(window.gps_track.swath_near_range_m) == 2
+    assert window.gps_track.swath_far_range_m[1] is None
+    assert list(window.gps_track.swath_quads()) == []
+
+
+def test_swath_quad_appears_once_far_range_is_actually_measured(monkeypatch):
+    window = MainWindow(AppConfig())
+    monkeypatch.setattr(
+        window.waterfall, "detect_channel_echo_edges",
+        lambda channel_w, gap, n_rows=200: {'port': (10, 400), 'stbd': (10, 400)})
+
+    import numpy as np
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+    meta1 = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': None, 'height': None}}
+    window._on_ping_received(port_raw, stbd_raw, meta1)
+    meta2 = {'nav_fix': {'lat': 41.31, 'lon': 36.33, 'heading': None, 'height': None}}
+    window._on_ping_received(port_raw, stbd_raw, meta2)
+
+    assert window.gps_track.swath_far_range_m[0] is not None
     assert len(list(window.gps_track.swath_quads())) == 1
 
 
@@ -114,6 +136,10 @@ def test_near_edge_ignores_detector_even_when_far_edge_is_used(monkeypatch):
 
 
 def test_swath_leaves_a_nadir_gap_using_fallback_fraction():
+    # The near-range guess is still computed and recorded even before the
+    # far edge is ever measured (it's cheap, and ready the moment real
+    # far-edge data does arrive) -- but with no far measurement yet, this
+    # window correctly draws no swath at all (see the test above).
     window = MainWindow(AppConfig())
     import numpy as np
     port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
@@ -125,7 +151,7 @@ def test_swath_leaves_a_nadir_gap_using_fallback_fraction():
     range_m = window._current_swath_range_m()
     expected_near = range_m * 0.08
     assert abs(window.gps_track.swath_near_range_m[0] - expected_near) < 1e-6
-    assert window.gps_track.swath_near_range_m[0] < window.gps_track.swath_far_range_m[0]
+    assert window.gps_track.swath_far_range_m[0] is None
 
 
 def test_swath_uses_reported_height_as_nadir_gap_when_available():

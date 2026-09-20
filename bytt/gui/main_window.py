@@ -371,6 +371,9 @@ class MainWindow(QMainWindow):
         if requested_range_m is None:
             return
         near_range_m, far_range_m = self._current_echo_range_m(nav_fix, requested_range_m)
+        # far_range_m is None when it hasn't actually been measured yet --
+        # GPSTrack still records a slot (keeping it positionally aligned
+        # with xs/ys) but draws no coverage for this point until it's earned.
         self.gps_track.add_swath_range(near_range_m, far_range_m)
 
     def _current_echo_range_m(self, nav_fix, requested_range_m):
@@ -405,8 +408,18 @@ class MainWindow(QMainWindow):
             far_m = sum(d[1] for d in detected) / len(detected) * meters_per_sample
             return near_m, far_m
         # Not enough buffered history yet for a reliable far-edge
-        # measurement either -- fall back to the requested range.
-        return near_m, requested_range_m
+        # measurement. Do NOT fall back to the requested range here --
+        # that would claim coverage out to the full configured range
+        # before it's actually been measured, which overstates what's
+        # been scanned rather than understating it. A real recording
+        # showed this plainly: the first ~16 fixes of a session got a
+        # 50m-wide band from this exact fallback, then the band visibly
+        # snapped down to the ~18-22m real measurement -- a discontinuity
+        # that read as "it scanned a bigger area, then a smaller one",
+        # when what actually happened is we started making an unearned
+        # claim and then stopped. No swath at all is the honest answer
+        # for a point nothing has been measured for yet.
+        return near_m, None
 
     def _current_near_range_m(self, nav_fix, range_m):
         height = nav_fix.get('height')
