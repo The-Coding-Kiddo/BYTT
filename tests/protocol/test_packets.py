@@ -147,3 +147,40 @@ def test_parse_3101_body_nav_fix_none_when_out_of_range():
 
     _port, _stbd, meta = packets.parse_3101_body(b'', bytes(body))
     assert meta['nav_fix'] is None
+
+
+def test_compute_bsf_range_m_matches_real_recording_figures():
+    # Cross-checked against a real 413MB recording (20250530_093513.bsf):
+    # sound_speed=1500.0 m/s, half_samples=5040, raw_sr=216000 Hz -> 17.5m,
+    # constant across the whole file. Also matches the formula in the real
+    # Qt app's BsfPlaybackConverter.cpp (range_m = (c/2) * (n/sampleRate)).
+    range_m = packets.compute_bsf_range_m(n_samples=5040, sample_rate_hz=216000, sound_speed_mps=1500.0)
+    assert abs(range_m - 17.5) < 1e-9
+
+
+def test_compute_bsf_range_m_returns_none_for_zero_sample_rate():
+    assert packets.compute_bsf_range_m(n_samples=100, sample_rate_hz=0, sound_speed_mps=1500.0) is None
+
+
+def test_compute_bsf_range_m_returns_none_for_zero_sound_speed():
+    # A blank/zeroed file header (e.g. a minimal test fixture) reads as
+    # sound_speed=0.0, not missing -- must not be treated as a real value.
+    assert packets.compute_bsf_range_m(n_samples=5040, sample_rate_hz=216000, sound_speed_mps=0.0) is None
+
+
+def test_get_ping_meta_without_sound_speed_omits_max_range():
+    ping = bytearray(pc.SAMPLE_OFFSET)
+    off = pc.CH_SR_OFFSET
+    struct.pack_into('<I', ping, off + 52, 5040)   # half_samples
+    struct.pack_into('<I', ping, off + 28, 216000)  # raw_sr
+    meta = packets.get_ping_meta(bytes(ping))
+    assert 'max_range_m' not in meta
+
+
+def test_get_ping_meta_with_sound_speed_includes_max_range():
+    ping = bytearray(pc.SAMPLE_OFFSET)
+    off = pc.CH_SR_OFFSET
+    struct.pack_into('<I', ping, off + 52, 5040)
+    struct.pack_into('<I', ping, off + 28, 216000)
+    meta = packets.get_ping_meta(bytes(ping), sound_speed_mps=1500.0)
+    assert abs(meta['max_range_m'] - 17.5) < 1e-9

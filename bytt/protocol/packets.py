@@ -13,17 +13,38 @@ def parse_channel(ping, ch_idx):
         'raw_sr':       struct.unpack_from('<I', ping, off + 28)[0],
     }
 
-def get_ping_meta(ping):
+def compute_bsf_range_m(n_samples, sample_rate_hz, sound_speed_mps):
+    """Sonar range isn't stored directly in a .bsf ping record -- it's a
+    function of how long the sonar listens (n_samples / sample_rate) and
+    how fast sound travels there and back (sound_speed, divided by 2 for
+    one-way distance). Ported from the real Qt app's BsfPlaybackConverter
+    (Core/Network/BsfPlaybackConverter.cpp), which computes the same
+    formula to rebuild the range field the live wire format carries
+    directly but the file format does not. Returns None if sample_rate_hz
+    is not positive (can't divide by it), or if sound_speed_mps is not
+    positive (a blank/zeroed file header, e.g., reads as 0.0 rather than
+    missing -- that's not a real value either)."""
+    if sample_rate_hz <= 0 or sound_speed_mps <= 0:
+        return None
+    return (sound_speed_mps / 2.0) * (n_samples / sample_rate_hz)
+
+
+def get_ping_meta(ping, sound_speed_mps=None):
     ch = parse_channel(ping, 0)
     y  = struct.unpack_from('<H', ping, 16)[0]
     mo = ping[18]; d = ping[19]
     h  = ping[20]; mi = ping[21]; s = ping[22]
-    return {
+    meta = {
         'ts':        f"{y}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}",
         'freq_kHz':  ch['freq_kHz'],
         'n_samples': ch['half_samples'],
         'raw_sr':    ch['raw_sr'],
     }
+    if sound_speed_mps is not None:
+        max_range_m = compute_bsf_range_m(ch['half_samples'], ch['raw_sr'], sound_speed_mps)
+        if max_range_m is not None:
+            meta['max_range_m'] = max_range_m
+    return meta
 
 def extract_nav_fix(nav_bytes):
     if len(nav_bytes) < pc.NAV_LAT_OFFSET + 8 or len(nav_bytes) < pc.NAV_LON_OFFSET + 8:

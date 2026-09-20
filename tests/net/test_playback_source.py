@@ -28,6 +28,31 @@ def _build_bsf_bytes(n_pings=3, n_samples=4):
     body = b''.join(_build_ping_record(n_samples) for _ in range(n_pings))
     return bytes(header) + body
 
+def test_playback_computes_real_max_range_m_from_file_header(tmp_path):
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    struct.pack_into('<f', header, 0x10, 1500.0)  # sound_speed
+    ping = bytearray(pc.SAMPLE_OFFSET)
+    struct.pack_into('<H', ping, pc.CH_SR_OFFSET + 2, 400)
+    struct.pack_into('<I', ping, pc.CH_SR_OFFSET + 28, 216000)  # raw_sr
+    struct.pack_into('<I', ping, pc.CH_SR_OFFSET + 52, 5040)    # half_samples
+    struct.pack_into('<I', ping, 0, pc.BSF_RECORD_TYPE)
+    struct.pack_into('<I', ping, 12, len(ping))
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header) + bytes(ping))
+
+    received = []
+    source = PlaybackSource(str(bsf_path), pings_per_second=1000)
+    source.ping_received.connect(lambda port, stbd, meta: received.append(meta))
+    source.start()
+    deadline = time.time() + 3.0
+    while time.time() < deadline and not received:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    source.stop()
+
+    assert received
+    assert abs(received[0]['max_range_m'] - 17.5) < 1e-6
+
 def test_playback_emits_one_ping_received_per_record(tmp_path):
     bsf_path = tmp_path / "fixture.bsf"
     bsf_path.write_bytes(_build_bsf_bytes(n_pings=3))
