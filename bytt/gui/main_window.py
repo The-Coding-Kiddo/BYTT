@@ -19,6 +19,7 @@ from bytt.config import same_segment
 from bytt.gui.connection_indicators import ConnectionIndicatorBar
 
 NO_DATA_WARNING_MS = 5000  # how long a live connection can go silent before we warn
+NADIR_GAP_FRACTION = 0.08  # fallback nadir-gap estimate when altitude isn't known
 
 _SPEED_LABELS = ["1×", "2×", "4×", "8×", "16×", "32×", "MAX"]
 _SPEED_MULTIPLIERS = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, None]  # None = MAX (zero delay)
@@ -370,8 +371,23 @@ class MainWindow(QMainWindow):
         range_m = self._current_swath_range_m()
         if range_m is None:
             return
+        near_range_m = self._current_near_range_m(nav_fix, range_m)
         x, y = self.gps_track.xs[-1], self.gps_track.ys[-1]
-        self.gps_track.add_swath_edge(x, y, heading, range_m)
+        self.gps_track.add_swath_edge(x, y, heading, range_m, near_range_m=near_range_m)
+
+    def _current_near_range_m(self, nav_fix, range_m):
+        height = nav_fix.get('height')
+        if height is not None and height > 0:
+            # Towfish altitude above the seabed roughly sets the nadir gap's
+            # width for a flat bottom. Unverified against real hardware,
+            # like every other live nav field, but a better estimate than a
+            # fixed guess when it's actually available.
+            return height
+        # No altitude data (always true in playback -- .bsf carries none;
+        # also true whenever live height comes back implausible). Fall back
+        # to a fixed fraction of range as a documented placeholder, not a
+        # measurement.
+        return range_m * NADIR_GAP_FRACTION
 
     def _on_channels_changed(self, port_on: bool, stbd_on: bool) -> None:
         self._port_on = port_on

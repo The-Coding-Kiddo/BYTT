@@ -67,6 +67,33 @@ def test_ping_received_builds_swath_using_course_made_good_when_no_heading():
     assert len(window.gps_track.swath_stbd_xs) == 1
 
 
+def test_swath_leaves_a_nadir_gap_using_fallback_fraction():
+    window = MainWindow(AppConfig())
+    import numpy as np
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+
+    meta = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': 0.0, 'height': None}}
+    window._on_ping_received(port_raw, stbd_raw, meta)
+
+    range_m = window._current_swath_range_m()
+    expected_near = range_m * 0.08
+    assert abs(window.gps_track.swath_stbd_near_xs[0] - expected_near) < 1e-6
+    assert window.gps_track.swath_stbd_near_xs[0] < window.gps_track.swath_stbd_xs[0]
+
+
+def test_swath_uses_reported_height_as_nadir_gap_when_available():
+    window = MainWindow(AppConfig())
+    import numpy as np
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+
+    meta = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': 0.0, 'height': 7.5}}
+    window._on_ping_received(port_raw, stbd_raw, meta)
+
+    assert abs(window.gps_track.swath_stbd_near_xs[0] - 7.5) < 1e-6
+
+
 def test_ping_received_uses_real_heading_when_available():
     window = MainWindow(AppConfig())
     import numpy as np

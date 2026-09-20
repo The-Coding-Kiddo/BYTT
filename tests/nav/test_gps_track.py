@@ -45,6 +45,20 @@ def test_swath_edge_perpendicular_to_heading_due_east():
     assert abs(track.swath_stbd_ys[0] - (-50.0)) < 1e-6
     assert abs(track.swath_port_ys[0] - 50.0) < 1e-6
 
+def test_swath_near_edge_defaults_to_zero_when_omitted():
+    track = GPSTrack()
+    track.add_swath_edge(x=0.0, y=0.0, heading_deg=0.0, range_m=50.0)
+    assert track.swath_stbd_near_xs[0] == 0.0
+    assert track.swath_port_near_xs[0] == 0.0
+
+def test_swath_near_edge_offset_due_north():
+    track = GPSTrack()
+    track.add_swath_edge(x=0.0, y=0.0, heading_deg=0.0, range_m=50.0, near_range_m=5.0)
+    assert abs(track.swath_stbd_near_xs[0] - 5.0) < 1e-6
+    assert abs(track.swath_port_near_xs[0] - (-5.0)) < 1e-6
+    # far edge unaffected by near_range_m
+    assert abs(track.swath_stbd_xs[0] - 50.0) < 1e-6
+
 def test_add_and_remove_waypoint():
     track = GPSTrack()
     wp_id = track.add_waypoint(41.5, 36.2, "wreck")

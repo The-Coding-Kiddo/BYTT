@@ -22,12 +22,19 @@ class GpsPanel(QDockWidget):
         swath_pen = pg.mkPen((90, 170, 220), width=1)
         self._swath_port_curve = self._plot.plot([], [], pen=swath_pen)
         self._swath_stbd_curve = self._plot.plot([], [], pen=swath_pen)
-        # A translucent fill between the two boundary curves reads as an
-        # actual coverage strip, not just two more thin lines next to the
-        # track -- two dashed lines alone were too subtle to notice.
-        self._swath_fill = pg.FillBetweenItem(
-            self._swath_port_curve, self._swath_stbd_curve, brush=pg.mkBrush(90, 170, 220, 60))
-        self._plot.addItem(self._swath_fill)
+        self._swath_port_near_curve = self._plot.plot([], [], pen=swath_pen)
+        self._swath_stbd_near_curve = self._plot.plot([], [], pen=swath_pen)
+        # Fill only between the near (nadir-gap) and far edges on each side,
+        # not straight across the track -- the strip under and near the
+        # towfish is a real blind spot, not scanned seabed, so it must stay
+        # unpainted rather than reading as a solid coverage slab.
+        swath_brush = pg.mkBrush(90, 170, 220, 60)
+        self._swath_port_fill = pg.FillBetweenItem(
+            self._swath_port_near_curve, self._swath_port_curve, brush=swath_brush)
+        self._swath_stbd_fill = pg.FillBetweenItem(
+            self._swath_stbd_near_curve, self._swath_stbd_curve, brush=swath_brush)
+        self._plot.addItem(self._swath_port_fill)
+        self._plot.addItem(self._swath_stbd_fill)
         self._track_curve = self._plot.plot([], [], pen=pg.mkPen((80, 160, 255), width=2))
         self._current_marker = pg.ScatterPlotItem(
             size=12, brush=pg.mkBrush(255, 200, 0), pen=pg.mkPen(None))
@@ -111,6 +118,8 @@ class GpsPanel(QDockWidget):
         self._track_curve.setData(track.xs, track.ys)
         self._swath_port_curve.setData(track.swath_port_xs, track.swath_port_ys)
         self._swath_stbd_curve.setData(track.swath_stbd_xs, track.swath_stbd_ys)
+        self._swath_port_near_curve.setData(track.swath_port_near_xs, track.swath_port_near_ys)
+        self._swath_stbd_near_curve.setData(track.swath_stbd_near_xs, track.swath_stbd_near_ys)
 
         if track.has_data:
             x, y = track.xs[-1], track.ys[-1]
