@@ -51,6 +51,33 @@ def test_disconnect_source_stops_recording_and_disables_action(tmp_path, monkeyp
     window.command_client.close()
 
 
+def test_ping_received_builds_swath_using_course_made_good_when_no_heading():
+    window = MainWindow(AppConfig())
+    import numpy as np
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+
+    meta1 = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': None, 'height': None}}
+    window._on_ping_received(port_raw, stbd_raw, meta1)
+    assert window.gps_track.swath_port_xs == []  # no previous fix yet -- no heading derivable
+
+    meta2 = {'nav_fix': {'lat': 41.31, 'lon': 36.33, 'heading': None, 'height': None}}
+    window._on_ping_received(port_raw, stbd_raw, meta2)
+    assert len(window.gps_track.swath_port_xs) == 1
+    assert len(window.gps_track.swath_stbd_xs) == 1
+
+
+def test_ping_received_uses_real_heading_when_available():
+    window = MainWindow(AppConfig())
+    import numpy as np
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+
+    meta = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': 90.0, 'height': None}}
+    window._on_ping_received(port_raw, stbd_raw, meta)
+    assert len(window.gps_track.swath_port_xs) == 1  # real heading -- no previous fix needed
+
+
 def test_data_indicator_turns_warning_after_no_data_timeout():
     window = MainWindow(AppConfig())
     window.connect_towfish("127.0.0.1", 1, 2)

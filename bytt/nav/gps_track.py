@@ -42,6 +42,10 @@ class GPSTrack:
         self._next_waypoint_id = 1
         self.speed_mps = 0.0
         self._last_fix_time = None
+        self.swath_port_xs = []
+        self.swath_port_ys = []
+        self.swath_stbd_xs = []
+        self.swath_stbd_ys = []
 
     def _project(self, lat, lon):
         if self.ref_lat is None:
@@ -103,6 +107,21 @@ class GPSTrack:
         if best is None:
             return None
         return self.xs[best], self.ys[best], self.ping_idx[best], best
+
+    def add_swath_edge(self, x, y, heading_deg, range_m):
+        """Records the port/starboard boundary of the strip of seafloor
+        actually scanned at this track point -- offset perpendicular to the
+        boat's heading by the sonar range on each side. (x, y) is a point
+        already in this track's local xy (e.g. xs[-1]/ys[-1] right after
+        add_fix). heading_deg is compass bearing, 0=N clockwise."""
+        rad = math.radians(heading_deg)
+        # Starboard (right of the direction of travel) unit vector: rotate
+        # the heading direction (sin, cos) by +90 degrees.
+        sx, sy = math.cos(rad), -math.sin(rad)
+        self.swath_stbd_xs.append(x + sx * range_m)
+        self.swath_stbd_ys.append(y + sy * range_m)
+        self.swath_port_xs.append(x - sx * range_m)
+        self.swath_port_ys.append(y - sy * range_m)
 
     def add_waypoint(self, lat, lon, name=""):
         wp_id = self._next_waypoint_id

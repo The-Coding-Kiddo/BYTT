@@ -12,7 +12,7 @@ from bytt.net.playback_source import PlaybackSource
 from bytt.gui.waterfall_view import WaterfallView, build_display_row
 from bytt.gui.controls_panel import ControlsPanel
 from bytt.gui.sonar_control_panel import SonarControlPanel
-from bytt.nav.gps_track import GPSTrack
+from bytt.nav.gps_track import GPSTrack, bearing_deg
 from bytt.gui.gps_panel import GpsPanel
 from bytt.net.recorder import Recorder
 from bytt.config import same_segment
@@ -349,6 +349,30 @@ class MainWindow(QMainWindow):
             self.scrub_slider.setValue(current_index)
             self.scrub_slider.blockSignals(False)
 
+    def _current_swath_range_m(self):
+        p = self.sonar_control_panel
+        ranges = []
+        if p.hf_enable.isChecked():
+            ranges.append(p.hf_range.value())
+        if p.lf_enable.isChecked():
+            ranges.append(p.lf_range.value())
+        return max(ranges) if ranges else None
+
+    def _update_swath(self, prev_latlon, nav_fix) -> None:
+        heading = nav_fix.get('heading')
+        if heading is None and prev_latlon is not None:
+            # No real heading (playback has none; live heading is
+            # unverified against hardware) -- fall back to course made
+            # good: the bearing from the previous fix to this one.
+            heading = bearing_deg(prev_latlon[0], prev_latlon[1], nav_fix['lat'], nav_fix['lon'])
+        if heading is None:
+            return
+        range_m = self._current_swath_range_m()
+        if range_m is None:
+            return
+        x, y = self.gps_track.xs[-1], self.gps_track.ys[-1]
+        self.gps_track.add_swath_edge(x, y, heading, range_m)
+
     def _on_channels_changed(self, port_on: bool, stbd_on: bool) -> None:
         self._port_on = port_on
         self._stbd_on = stbd_on
@@ -376,7 +400,9 @@ class MainWindow(QMainWindow):
                 self._latest_heading = nav_fix.get('heading')
                 latlon = (nav_fix['lat'], nav_fix['lon'])
                 if latlon != self.gps_track._last_latlon:
+                    prev_latlon = self.gps_track._last_latlon
                     self.gps_track.add_fix(self.waterfall.rows_written, nav_fix['lat'], nav_fix['lon'])
+                    self._update_swath(prev_latlon, nav_fix)
                     self.gps_panel.refresh(heading=self._latest_heading)
         except Exception as e:
             self.statusBar().showMessage(f"ping display error: {e}")

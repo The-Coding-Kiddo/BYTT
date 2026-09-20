@@ -28,6 +28,23 @@ def test_speed_computed_from_consecutive_fixes(monkeypatch):
     assert track.speed_mps > 0
     assert 10.0 < track.speed_mps < 12.0  # ~111.2m / 10s ≈ 11.12 m/s
 
+def test_swath_edge_perpendicular_to_heading_due_north():
+    track = GPSTrack()
+    # Facing due north (heading=0), starboard is east (+x), port is west (-x).
+    track.add_swath_edge(x=0.0, y=0.0, heading_deg=0.0, range_m=50.0)
+    assert abs(track.swath_stbd_xs[0] - 50.0) < 1e-6
+    assert abs(track.swath_stbd_ys[0] - 0.0) < 1e-6
+    assert abs(track.swath_port_xs[0] - (-50.0)) < 1e-6
+    assert abs(track.swath_port_ys[0] - 0.0) < 1e-6
+
+def test_swath_edge_perpendicular_to_heading_due_east():
+    track = GPSTrack()
+    # Facing due east (heading=90), starboard is south (-y), port is north (+y).
+    track.add_swath_edge(x=0.0, y=0.0, heading_deg=90.0, range_m=50.0)
+    assert abs(track.swath_stbd_xs[0] - 0.0) < 1e-6
+    assert abs(track.swath_stbd_ys[0] - (-50.0)) < 1e-6
+    assert abs(track.swath_port_ys[0] - 50.0) < 1e-6
+
 def test_add_and_remove_waypoint():
     track = GPSTrack()
     wp_id = track.add_waypoint(41.5, 36.2, "wreck")

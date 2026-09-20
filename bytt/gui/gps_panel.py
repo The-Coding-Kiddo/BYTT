@@ -20,6 +20,9 @@ class GpsPanel(QDockWidget):
         self._plot.showGrid(x=True, y=True, alpha=0.3)
 
         self._track_curve = self._plot.plot([], [], pen=pg.mkPen((80, 160, 255), width=2))
+        swath_pen = pg.mkPen((120, 120, 120), width=1, style=pg.QtCore.Qt.PenStyle.DashLine)
+        self._swath_port_curve = self._plot.plot([], [], pen=swath_pen)
+        self._swath_stbd_curve = self._plot.plot([], [], pen=swath_pen)
         self._current_marker = pg.ScatterPlotItem(
             size=12, brush=pg.mkBrush(255, 200, 0), pen=pg.mkPen(None))
         self._plot.addItem(self._current_marker)
@@ -100,6 +103,8 @@ class GpsPanel(QDockWidget):
     def refresh(self, heading: float | None = None) -> None:
         track = self.gps_track
         self._track_curve.setData(track.xs, track.ys)
+        self._swath_port_curve.setData(track.swath_port_xs, track.swath_port_ys)
+        self._swath_stbd_curve.setData(track.swath_stbd_xs, track.swath_stbd_ys)
 
         if track.has_data:
             x, y = track.xs[-1], track.ys[-1]
