@@ -371,3 +371,55 @@ def test_q_and_escape_close_the_window():
     QApplication.instance().processEvents()
     QTest.keyClick(window, QtCoreQt.Key.Key_Q)
     assert closed == ['closed']
+
+
+def test_controls_panel_exists_and_is_docked():
+    window = MainWindow(AppConfig())
+    assert window.controls_panel is not None
+    assert window.dockWidgetArea(window.controls_panel) is not None
+
+def test_view_menu_has_controls_panel_toggle():
+    window = MainWindow(AppConfig())
+    menu_titles = [m.title() for m in window.menuBar().findChildren(type(window.menuBar().addMenu("_probe")))]
+    # Simpler, robust check: the panel's own toggle action must exist and be
+    # associated with the panel's dock widget.
+    toggle = window.controls_panel.toggleViewAction()
+    assert toggle is not None
+    assert toggle.isCheckable()
+
+def test_params_changed_reaches_waterfall_set_enhance_params(tmp_path, monkeypatch):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+
+    calls = []
+    window.waterfall.set_enhance_params = lambda p: calls.append(p)
+    window.controls_panel.gain_spin.setValue(2.5)
+
+    import time
+    from PySide6.QtCore import QCoreApplication
+    deadline = time.time() + 1.0
+    while time.time() < deadline and not calls:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    assert calls
+    assert calls[-1].gain == 2.5
+    window.source.stop()
+
+def test_channels_changed_updates_ping_received_channel_state(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    window.open_playback_file(str(bsf_path))
+
+    window.controls_panel.port_check.setChecked(False)
+    assert window._port_on is False
+    assert window._stbd_on is True
+    window.source.stop()

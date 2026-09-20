@@ -10,6 +10,7 @@ from bytt.net.live_client import LiveClient
 from bytt.net.command_client import CommandClient
 from bytt.net.playback_source import PlaybackSource
 from bytt.gui.waterfall_view import WaterfallView, build_display_row
+from bytt.gui.controls_panel import ControlsPanel
 
 _SPEED_LABELS = ["1×", "2×", "4×", "8×", "16×", "32×", "MAX"]
 _SPEED_MULTIPLIERS = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, None]  # None = MAX (zero delay)
@@ -40,6 +41,16 @@ class MainWindow(QMainWindow):
         disconnect_action = QAction("&Disconnect", self)
         disconnect_action.triggered.connect(self.disconnect_source)
         connect_menu.addAction(disconnect_action)
+
+        self.controls_panel = ControlsPanel(self)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.controls_panel)
+        self.controls_panel.params_changed.connect(self.waterfall.set_enhance_params)
+        self.controls_panel.channels_changed.connect(self._on_channels_changed)
+        self._port_on = True
+        self._stbd_on = True
+
+        view_menu = self.menuBar().addMenu("&View")
+        view_menu.addAction(self.controls_panel.toggleViewAction())
 
         self.playback_toolbar = QToolBar("Playback", self)
         self.addToolBar(self.playback_toolbar)
@@ -236,6 +247,10 @@ class MainWindow(QMainWindow):
             self.scrub_slider.setValue(current_index)
             self.scrub_slider.blockSignals(False)
 
+    def _on_channels_changed(self, port_on: bool, stbd_on: bool) -> None:
+        self._port_on = port_on
+        self._stbd_on = stbd_on
+
     def _on_ping_received(self, port_raw, stbd_raw, meta) -> None:
         # build_display_row interpolates EACH channel to channel_w samples,
         # then concatenates them with a gap in between, so the resulting row
@@ -246,7 +261,8 @@ class MainWindow(QMainWindow):
             channel_w = (self.waterfall.row_width - gap) // 2
             row_f32 = build_display_row(
                 port_raw, stbd_raw, channel_w=channel_w,
-                port_on=True, stbd_on=True, gap=gap, interp_xs_cache=self._interp_cache,
+                port_on=self._port_on, stbd_on=self._stbd_on, gap=gap,
+                interp_xs_cache=self._interp_cache,
             )
             self.waterfall.add_row(row_f32)
         except Exception as e:
