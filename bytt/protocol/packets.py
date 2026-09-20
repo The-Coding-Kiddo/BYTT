@@ -42,6 +42,32 @@ def extract_nav_fix(nav_bytes):
         return None
     return lat, lon, ts
 
+def extract_live_nav_fix(body_and_data):
+    """Reads nav data embedded in a live 3101 packet's body -- SatCenter
+    fills the sonar's own reserved2[24] field with lon/lat/heading/height
+    (see hytem-data-protocol-v1.0.9.md / waterfall-vendor-sdk.md).
+
+    UNVERIFIED against real hardware -- inferred from vendor docs only, no
+    live towfish has ever produced this data. Treat with more suspicion
+    than the .bsf file nav path (extract_nav_fix), which real recordings
+    have confirmed correct."""
+    if len(body_and_data) < 104:
+        return None
+    try:
+        lon     = struct.unpack_from('<d', body_and_data, 80)[0]
+        lat     = struct.unpack_from('<d', body_and_data, 88)[0]
+        heading = struct.unpack_from('<f', body_and_data, 96)[0]
+        height  = struct.unpack_from('<f', body_and_data, 100)[0]
+    except struct.error:
+        return None
+    if not np.isfinite(lat) or not np.isfinite(lon):
+        return None
+    if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+        return None
+    if abs(lat) < 1e-6 and abs(lon) < 1e-6:
+        return None
+    return {'lat': lat, 'lon': lon, 'heading': heading, 'height': height}
+
 def extract_raw_channels(ping, p_lo=pc.AMP_NORM_P_LO_DEFAULT, p_hi=pc.AMP_NORM_P_HI_DEFAULT):
     ch   = parse_channel(ping, 0)
     n    = ch['half_samples']
@@ -171,6 +197,7 @@ def parse_3101_body(header_bytes, body_and_data):
         'raw_sr':      sample_rate,
         'ping_number': ping_number,
         'max_range_m': sonar_range_cm / 100.0,
+        'nav_fix':     extract_live_nav_fix(body_and_data),
     }
     return port[::-1], stbd, meta
 

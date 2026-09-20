@@ -81,3 +81,69 @@ def test_extract_nav_fix_accepts_valid_fix():
     struct.pack_into(pc.NAV_FIELD_FMT, nav, pc.NAV_LON_OFFSET, 36.3)
     result = packets.extract_nav_fix(bytes(nav))
     assert result == (41.3, 36.3, 0.0)
+
+
+def _body_with_nav(lon, lat, heading, height, body_size=pc.B3101_BODY_SIZE):
+    body = bytearray(body_size)
+    struct.pack_into('<d', body, 80, lon)
+    struct.pack_into('<d', body, 88, lat)
+    struct.pack_into('<f', body, 96, heading)
+    struct.pack_into('<f', body, 100, height)
+    return bytes(body)
+
+
+def test_extract_live_nav_fix_valid_data():
+    body = _body_with_nav(lon=36.13, lat=41.47, heading=270.5, height=12.0)
+    fix = packets.extract_live_nav_fix(body)
+    assert fix is not None
+    assert abs(fix['lat'] - 41.47) < 1e-9
+    assert abs(fix['lon'] - 36.13) < 1e-9
+    assert abs(fix['heading'] - 270.5) < 1e-4
+    assert abs(fix['height'] - 12.0) < 1e-4
+
+
+def test_extract_live_nav_fix_rejects_out_of_range_lat_lon():
+    body = _body_with_nav(lon=999.0, lat=999.0, heading=0.0, height=0.0)
+    assert packets.extract_live_nav_fix(body) is None
+
+
+def test_extract_live_nav_fix_rejects_zero_zero():
+    body = _body_with_nav(lon=0.0, lat=0.0, heading=0.0, height=0.0)
+    assert packets.extract_live_nav_fix(body) is None
+
+
+def test_extract_live_nav_fix_rejects_truncated_data():
+    body = bytes(50)  # shorter than offset 100 + 4 needed for height
+    assert packets.extract_live_nav_fix(body) is None
+
+
+def test_parse_3101_body_includes_nav_fix_in_meta():
+    n = 2
+    body = bytearray(pc.B3101_BODY_SIZE + 2 * n * 2)
+    syn = pc.B3101_SYNTIME_OFF
+    struct.pack_into('<H', body, syn, 2024)  # year
+    body[syn + 2] = 6   # month
+    body[syn + 3] = 1   # day
+    body[syn + 4] = 12  # hour
+    body[syn + 5] = 0   # minute
+    body[syn + 6] = 0   # second
+    struct.pack_into('<I', body, pc.B3101_SAMPLELEN_OFF, n)
+    struct.pack_into('<d', body, 80, 36.13)
+    struct.pack_into('<d', body, 88, 41.47)
+    struct.pack_into('<f', body, 96, 90.0)
+    struct.pack_into('<f', body, 100, 5.0)
+
+    _port, _stbd, meta = packets.parse_3101_body(b'', bytes(body))
+    assert meta['nav_fix'] is not None
+    assert abs(meta['nav_fix']['lat'] - 41.47) < 1e-9
+
+
+def test_parse_3101_body_nav_fix_none_when_out_of_range():
+    n = 2
+    body = bytearray(pc.B3101_BODY_SIZE + 2 * n * 2)
+    struct.pack_into('<I', body, pc.B3101_SAMPLELEN_OFF, n)
+    struct.pack_into('<d', body, 80, 999.0)
+    struct.pack_into('<d', body, 88, 999.0)
+
+    _port, _stbd, meta = packets.parse_3101_body(b'', bytes(body))
+    assert meta['nav_fix'] is None
