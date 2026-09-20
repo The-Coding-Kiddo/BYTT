@@ -3,11 +3,13 @@ interface LiveClient exposes, so GUI code cannot tell live data from
 playback apart. Adds pause/resume/step/seek on top of that shared
 interface -- PlaybackSource-only, since a live feed has no "past" to
 step back into."""
+import bisect
 import threading
 from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 from bytt.bsf.file_io import load_all_pings
-from bytt.protocol.packets import extract_raw_channels, get_ping_meta
+from bytt.protocol.packets import extract_raw_channels, get_ping_meta, extract_nav_fix
+from bytt.protocol import constants as pc
 
 
 class PlaybackSource(QObject):
@@ -24,6 +26,7 @@ class PlaybackSource(QObject):
         self._thread = None
         self._data = None
         self._pings = []
+        self._nav_fixes = []  # [(ping_index_before_it, {'lat', 'lon', 'heading', 'height'}), ...]
         self._current_index = -1
         self._pending_seek = None
         self._seek_lock = threading.Lock()
@@ -86,11 +89,24 @@ class PlaybackSource(QObject):
             self._pending_seek = None
             return v
 
+    def _nav_fix_for(self, ping_index):
+        if not self._nav_fixes:
+            return None
+        keys = [t[0] for t in self._nav_fixes]
+        # nav_records store the index of the last ping emitted *before* the
+        # nav record was written, so a fix only applies to pings strictly
+        # after that index -- bisect_left (not _right) encodes that.
+        idx = bisect.bisect_left(keys, ping_index)
+        if idx == 0:
+            return None
+        return self._nav_fixes[idx - 1][1]
+
     def _emit_current(self):
         offset, size = self._pings[self._current_index]
         ping = self._data[offset:offset + size]
         port_raw, stbd_raw = extract_raw_channels(ping)
         meta = get_ping_meta(ping)
+        meta['nav_fix'] = self._nav_fix_for(self._current_index)
         self.ping_received.emit(port_raw, stbd_raw, meta)
         self.position_changed.emit(self._current_index, len(self._pings))
 
@@ -116,10 +132,17 @@ class PlaybackSource(QObject):
         self.status_changed.emit('loading')
         try:
             self._data = path.read_bytes()
-            self._pings, _nav_records = load_all_pings(self._data)
+            self._pings, nav_records = load_all_pings(self._data)
         except Exception as e:
             self.status_changed.emit(f'playback error: {e}')
             return
+        self._nav_fixes = []
+        for offset, ping_idx_before in nav_records:
+            fix = extract_nav_fix(self._data[offset:offset + pc.NAV_RECORD_SIZE])
+            if fix is not None:
+                lat, lon, _ts = fix
+                self._nav_fixes.append(
+                    (ping_idx_before, {'lat': lat, 'lon': lon, 'heading': None, 'height': None}))
         if not self._pings:
             self.status_changed.emit('playback error: no ping records found')
             return

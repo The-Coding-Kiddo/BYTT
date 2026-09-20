@@ -382,3 +382,58 @@ def test_controls_still_work_after_playback_reaches_end_of_file(tmp_path):
     QCoreApplication.processEvents()
 
     source.stop()
+
+def _build_nav_record(lat, lon, ts=0.0):
+    rec = bytearray(pc.NAV_RECORD_SIZE)
+    struct.pack_into('<I', rec, 0, pc.BSF_RECORD_TYPE)
+    struct.pack_into('<I', rec, 12, pc.NAV_RECORD_SIZE)
+    struct.pack_into('<d', rec, pc.NAV_TS_OFFSET, ts)
+    struct.pack_into('<d', rec, pc.NAV_LAT_OFFSET, lat)
+    struct.pack_into('<d', rec, pc.NAV_LON_OFFSET, lon)
+    return bytes(rec)
+
+def test_pings_before_first_nav_record_have_no_nav_fix(tmp_path):
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(_build_bsf_bytes_n(n_pings=3))  # no nav records at all
+
+    received = []
+    source = PlaybackSource(str(bsf_path), pings_per_second=1000)
+    source.ping_received.connect(lambda port, stbd, meta: received.append(meta))
+    source.start()
+    deadline = time.time() + 3.0
+    while time.time() < deadline and len(received) < 3:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    source.stop()
+
+    assert len(received) == 3
+    assert all(m['nav_fix'] is None for m in received)
+
+def test_nav_record_attaches_to_every_subsequent_ping_until_superseded(tmp_path):
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    ping = _build_ping_record(n_samples=4)
+    nav1 = _build_nav_record(lat=41.0, lon=36.0)
+    nav2 = _build_nav_record(lat=42.0, lon=37.0)
+    # layout: ping, ping, nav1, ping, ping, nav2, ping
+    body = ping + ping + nav1 + ping + ping + nav2 + ping
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header) + body)
+
+    received = []
+    source = PlaybackSource(str(bsf_path), pings_per_second=1000)
+    source.ping_received.connect(lambda port, stbd, meta: received.append(meta))
+    source.start()
+    deadline = time.time() + 3.0
+    while time.time() < deadline and len(received) < 5:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    source.stop()
+
+    assert len(received) == 5
+    assert received[0]['nav_fix'] is None
+    assert received[1]['nav_fix'] is None
+    assert abs(received[2]['nav_fix']['lat'] - 41.0) < 1e-9
+    assert abs(received[3]['nav_fix']['lat'] - 41.0) < 1e-9
+    assert abs(received[4]['nav_fix']['lat'] - 42.0) < 1e-9
+    assert received[4]['nav_fix']['heading'] is None
+    assert received[4]['nav_fix']['height'] is None
