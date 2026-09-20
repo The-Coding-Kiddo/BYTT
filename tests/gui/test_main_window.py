@@ -15,6 +15,42 @@ def test_main_window_starts_disconnected():
     assert window.statusBar().currentMessage() in ("", "disconnected")
     assert window.source is None
 
+def test_record_action_enabled_on_connect_and_writes_packets(tmp_path, monkeypatch):
+    window = MainWindow(AppConfig())
+    monkeypatch.setattr(window.recorder, "directory", tmp_path)
+    assert not window.record_action.isEnabled()
+
+    window.connect_towfish("127.0.0.1", 1, 2)  # bogus port, connect fails async in a thread
+    assert window.record_action.isEnabled()
+
+    window.record_action.setChecked(True)
+    assert window.recorder.is_recording
+    window.source.raw_packet_received.emit(b"hello")
+    window.record_action.setChecked(False)
+    assert not window.recorder.is_recording
+
+    written = list(tmp_path.iterdir())
+    assert len(written) == 1
+    assert written[0].read_bytes() == b"hello"
+
+    window.disconnect_source()
+    window.command_client.close()
+
+
+def test_disconnect_source_stops_recording_and_disables_action(tmp_path, monkeypatch):
+    window = MainWindow(AppConfig())
+    monkeypatch.setattr(window.recorder, "directory", tmp_path)
+    window.connect_towfish("127.0.0.1", 1, 2)
+    window.record_action.setChecked(True)
+    assert window.recorder.is_recording
+
+    window.disconnect_source()
+    assert not window.recorder.is_recording
+    assert not window.record_action.isEnabled()
+    assert not window.record_action.isChecked()
+    window.command_client.close()
+
+
 def test_main_window_has_connect_and_playback_actions():
     window = MainWindow(AppConfig())
     action_texts = {a.text() for a in window.menuBar().actions()[0].menu().actions()}

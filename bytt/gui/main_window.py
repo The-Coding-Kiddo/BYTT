@@ -13,6 +13,7 @@ from bytt.gui.waterfall_view import WaterfallView, build_display_row
 from bytt.gui.controls_panel import ControlsPanel
 from bytt.nav.gps_track import GPSTrack
 from bytt.gui.gps_panel import GpsPanel
+from bytt.net.recorder import Recorder
 
 _SPEED_LABELS = ["1×", "2×", "4×", "8×", "16×", "32×", "MAX"]
 _SPEED_MULTIPLIERS = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, None]  # None = MAX (zero delay)
@@ -43,6 +44,13 @@ class MainWindow(QMainWindow):
         disconnect_action = QAction("&Disconnect", self)
         disconnect_action.triggered.connect(self.disconnect_source)
         connect_menu.addAction(disconnect_action)
+
+        self.recorder = Recorder()
+        self.record_action = QAction("&Record", self)
+        self.record_action.setCheckable(True)
+        self.record_action.setEnabled(False)
+        self.record_action.toggled.connect(self._on_record_toggled)
+        connect_menu.addAction(self.record_action)
 
         self.controls_panel = ControlsPanel(self)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.controls_panel)
@@ -135,7 +143,16 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.disconnect_source()
         self.command_client.close()
+        self.recorder.stop()
         super().closeEvent(event)
+
+    def _on_record_toggled(self, checked: bool) -> None:
+        if checked:
+            path = self.recorder.start()
+            self.statusBar().showMessage(f"recording to {path}")
+        else:
+            self.recorder.stop()
+            self.statusBar().showMessage("recording stopped")
 
     def _prompt_connect_towfish(self):
         host, ok = QInputDialog.getText(self, "Connect to Towfish", "Towfish IP:",
@@ -157,6 +174,8 @@ class MainWindow(QMainWindow):
         self.source = LiveClient(host, data_port, parent=self)
         self.waterfall.live_mode = True
         self._wire_source()
+        self.source.raw_packet_received.connect(self.recorder.write_packet)
+        self.record_action.setEnabled(True)
         self.source.start()
         try:
             self.command_client.connect_to(host, cmd_port)
@@ -178,6 +197,9 @@ class MainWindow(QMainWindow):
         if self.source is not None:
             self.source.stop()
             self.source = None
+        self.recorder.stop()
+        self.record_action.setChecked(False)
+        self.record_action.setEnabled(False)
         self.playback_toolbar.setVisible(False)
         self._is_playing = False
 
