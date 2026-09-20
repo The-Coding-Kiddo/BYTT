@@ -423,3 +423,64 @@ def test_channels_changed_updates_ping_received_channel_state(tmp_path):
     assert window._port_on is False
     assert window._stbd_on is True
     window.source.stop()
+
+
+def test_main_window_has_gps_track_and_panel():
+    window = MainWindow(AppConfig())
+    from bytt.nav.gps_track import GPSTrack
+    from bytt.gui.gps_panel import GpsPanel
+    assert isinstance(window.gps_track, GPSTrack)
+    assert isinstance(window.gps_panel, GpsPanel)
+    assert window._latest_heading is None
+
+
+def test_connect_towfish_and_open_playback_each_create_a_fresh_gps_track(tmp_path):
+    from bytt.protocol import constants as pc
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    bsf_path = tmp_path / "fixture.bsf"
+    bsf_path.write_bytes(bytes(header))
+
+    window = MainWindow(AppConfig())
+    first_track = window.gps_track
+    window.open_playback_file(str(bsf_path))
+    assert window.gps_track is not first_track
+    window.source.stop()
+
+    second_track = window.gps_track
+    window.open_playback_file(str(bsf_path))
+    assert window.gps_track is not second_track
+    window.source.stop()
+
+
+def test_on_ping_received_feeds_nav_fix_into_gps_track_and_refreshes_panel():
+    import numpy as np
+    window = MainWindow(AppConfig())
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+
+    meta = {'nav_fix': {'lat': 41.47, 'lon': 36.13, 'heading': 90.0, 'height': 5.0}}
+    window._on_ping_received(port_raw, stbd_raw, meta)
+
+    assert window.gps_track.has_data
+    assert window._latest_heading == 90.0
+
+
+def test_on_ping_received_with_no_nav_fix_does_not_touch_gps_track():
+    import numpy as np
+    window = MainWindow(AppConfig())
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+
+    window._on_ping_received(port_raw, stbd_raw, {'nav_fix': None})
+    assert not window.gps_track.has_data
+
+
+def test_view_menu_has_gps_panel_toggle():
+    window = MainWindow(AppConfig())
+    view_menu = None
+    for action in window.menuBar().actions():
+        if action.text() == "&View":
+            view_menu = action.menu()
+    assert view_menu is not None
+    texts = {a.text() for a in view_menu.actions()}
+    assert any("GPS" in t for t in texts)

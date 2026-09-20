@@ -11,6 +11,8 @@ from bytt.net.command_client import CommandClient
 from bytt.net.playback_source import PlaybackSource
 from bytt.gui.waterfall_view import WaterfallView, build_display_row
 from bytt.gui.controls_panel import ControlsPanel
+from bytt.nav.gps_track import GPSTrack
+from bytt.gui.gps_panel import GpsPanel
 
 _SPEED_LABELS = ["1×", "2×", "4×", "8×", "16×", "32×", "MAX"]
 _SPEED_MULTIPLIERS = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, None]  # None = MAX (zero delay)
@@ -51,6 +53,12 @@ class MainWindow(QMainWindow):
 
         view_menu = self.menuBar().addMenu("&View")
         view_menu.addAction(self.controls_panel.toggleViewAction())
+
+        self.gps_track = GPSTrack()
+        self._latest_heading = None
+        self.gps_panel = GpsPanel(self.gps_track, self)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.gps_panel)
+        view_menu.addAction(self.gps_panel.toggleViewAction())
 
         self.playback_toolbar = QToolBar("Playback", self)
         self.addToolBar(self.playback_toolbar)
@@ -142,6 +150,9 @@ class MainWindow(QMainWindow):
 
     def connect_towfish(self, host: str, data_port: int, cmd_port: int) -> None:
         self.disconnect_source()
+        self.gps_track = GPSTrack()
+        self._latest_heading = None
+        self.gps_panel.gps_track = self.gps_track
         self.source = LiveClient(host, data_port, parent=self)
         self.waterfall.live_mode = True
         self._wire_source()
@@ -153,6 +164,9 @@ class MainWindow(QMainWindow):
 
     def open_playback_file(self, path: str) -> None:
         self.disconnect_source()
+        self.gps_track = GPSTrack()
+        self._latest_heading = None
+        self.gps_panel.gps_track = self.gps_track
         self.source = PlaybackSource(path)
         self.waterfall.live_mode = False
         self._wire_source()
@@ -265,5 +279,11 @@ class MainWindow(QMainWindow):
                 interp_xs_cache=self._interp_cache,
             )
             self.waterfall.add_row(row_f32)
+
+            nav_fix = meta.get('nav_fix')
+            if nav_fix is not None:
+                self.gps_track.add_fix(self.waterfall.rows_written, nav_fix['lat'], nav_fix['lon'])
+                self._latest_heading = nav_fix.get('heading')
+                self.gps_panel.refresh(heading=self._latest_heading)
         except Exception as e:
             self.statusBar().showMessage(f"ping display error: {e}")
