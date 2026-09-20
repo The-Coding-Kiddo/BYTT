@@ -118,3 +118,63 @@ def test_only_latest_generation_is_ever_displayed():
         QCoreApplication.processEvents()
         time.sleep(0.01)
     assert view._displayed_generation == view._job_generation
+
+
+def test_grayscale_cache_skips_pipeline_when_only_light_params_change(monkeypatch):
+    import bytt.gui.waterfall_view as wv_module
+    call_count = {"n": 0}
+    real_enhance = wv_module.enhance_pixels
+    def counting_enhance(*args, **kwargs):
+        call_count["n"] += 1
+        return real_enhance(*args, **kwargs)
+    monkeypatch.setattr(wv_module, "enhance_pixels", counting_enhance)
+
+    view = WaterfallView(max_rows=5, width=8)
+    row = np.full(8, 0.5, dtype=np.float32)
+    view.add_row(row)  # add_row's own per-row call also goes through enhance_pixels
+
+    calls_before_jobs = call_count["n"]
+    view.set_enhance_params(_params(gain=1.0))
+    deadline = time.time() + 3.0
+    while time.time() < deadline and view._displayed_generation < view._job_generation:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    calls_after_first_job = call_count["n"]
+    assert calls_after_first_job > calls_before_jobs  # first job: real pipeline ran
+
+    # Only gain changes (a "light" param, not in HEAVY_FIELDS) -> cache hit, no new pipeline call.
+    view.set_enhance_params(_params(gain=2.5))
+    deadline = time.time() + 3.0
+    while time.time() < deadline and view._displayed_generation < view._job_generation:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    assert call_count["n"] == calls_after_first_job
+
+    # A "heavy" param (contrast_idx) changes -> cache miss, pipeline runs again.
+    view.set_enhance_params(_params(gain=2.5, contrast_idx=0))
+    deadline = time.time() + 3.0
+    while time.time() < deadline and view._displayed_generation < view._job_generation:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    assert call_count["n"] > calls_after_first_job
+
+def test_large_buffer_gets_downscaled_and_upscaled_back_to_original_shape():
+    # 50*2000 = 100,000px. That's under WORK_BUDGET_PX (1,500,000) and
+    # WORK_BUDGET_PX_LIVE (600,000), but over WORK_BUDGET_PX_NLM (40,000) --
+    # so selecting NL-Means denoise (NOISE_MODES index 3) is what forces a
+    # real downscale-then-upscale-back within a test that stays fast.
+    view = WaterfallView(max_rows=50, width=2000)
+    for _ in range(50):
+        row = np.random.rand(2000).astype(np.float32)
+        view.add_row(row)
+
+    received = []
+    view.enhancement_ready.connect(lambda rgb, gen: received.append(rgb))
+    view.set_enhance_params(_params(gain=1.0, noise_idx=3))  # 3 == NOISE_MODES.index("NL-Means")
+    deadline = time.time() + 5.0
+    while time.time() < deadline and not received:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    assert received
+    assert received[-1] is not None
+    assert received[-1].shape == (50, 2000, 3)  # full original resolution after upscale-back

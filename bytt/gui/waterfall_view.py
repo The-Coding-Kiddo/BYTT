@@ -1,12 +1,19 @@
 """The scrolling waterfall display: combines a ping's port/starboard raw
 channels into one display row, and a pyqtgraph-based scrolling image widget
 that renders those rows (replaces the pygame-based FastWaterfall)."""
+import cv2
 import threading
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Signal
 from bytt.processing.colormap import LUT_PALETTES, LUT_NAMES, build_combined_lut
-from bytt.processing.enhancement import DEFAULT_ENHANCE_PARAMS, enhance_pixels, tint
+from bytt.processing.enhancement import (
+    DEFAULT_ENHANCE_PARAMS, enhance_pixels, tint, heavy_key, NOISE_MODES,
+)
+
+WORK_BUDGET_PX = 1_500_000       # paused, seeking, or ordinary file playback
+WORK_BUDGET_PX_NLM = 40_000      # NL-Means is too slow above this size
+WORK_BUDGET_PX_LIVE = 600_000    # genuine live acquisition only
 
 
 def build_display_row(port_raw, stbd_raw, channel_w, port_on, stbd_on, gap,
@@ -61,6 +68,12 @@ class WaterfallView(pg.GraphicsLayoutWidget):
         self._worker_thread.start()
         self.enhancement_ready.connect(self._on_enhancement_ready)
 
+        self._cached_enhanced = None
+        self._cached_target_mask = None
+        self._cached_shadow_mask = None
+        self._cached_heavy_key = None
+        self._cached_data_generation = -1
+
     def set_palette(self, name: str, gain: float = 1.0, gamma: float = 1.0) -> None:
         self._combined_lut = build_combined_lut(gain=gain, gamma=gamma,
                                                   colour_lut=LUT_PALETTES[name])
@@ -102,10 +115,55 @@ class WaterfallView(pg.GraphicsLayoutWidget):
                 job = self._job
             if job is None or job[2] <= last_done_gen:
                 continue
-            raw, params, gen, _data_gen = job
+            raw, params, gen, data_gen = job
             last_done_gen = gen
             try:
-                img8, target_mask, shadow_mask = enhance_pixels(raw, params)
+                fh, fw = raw.shape
+                hk = heavy_key(params)
+                use_cache = (
+                    self._cached_enhanced is not None
+                    and data_gen == self._cached_data_generation
+                    and hk == self._cached_heavy_key
+                    and self._cached_enhanced.shape[:2] == (fh, fw)
+                )
+                if use_cache:
+                    img8 = self._cached_enhanced
+                    target_mask = self._cached_target_mask
+                    shadow_mask = self._cached_shadow_mask
+                else:
+                    if NOISE_MODES[params.noise_idx] == "NL-Means":
+                        budget = WORK_BUDGET_PX_NLM
+                    elif params.fast:
+                        budget = WORK_BUDGET_PX_LIVE
+                    else:
+                        budget = WORK_BUDGET_PX
+                    scale = min(1.0, (budget / float(fh * fw)) ** 0.5)
+                    if scale < 1.0:
+                        ww, wh = max(1, int(fw * scale)), max(1, int(fh * scale))
+                        work = cv2.resize(raw, (ww, wh), interpolation=cv2.INTER_AREA)
+                        p_scaled = params._replace(
+                            target_ksize=max(3, int(round(params.target_ksize * scale)) | 1))
+                    else:
+                        work = raw
+                        p_scaled = params
+                    img8, target_mask, shadow_mask = enhance_pixels(work, p_scaled)
+                    if scale < 1.0:
+                        interp = cv2.INTER_LINEAR if params.fast else cv2.INTER_LANCZOS4
+                        img8 = cv2.resize(img8, (fw, fh), interpolation=interp)
+                        if target_mask is not None:
+                            target_mask = cv2.resize(
+                                target_mask.astype(np.uint8), (fw, fh),
+                                interpolation=cv2.INTER_NEAREST).astype(bool)
+                        if shadow_mask is not None:
+                            shadow_mask = cv2.resize(
+                                shadow_mask.astype(np.uint8), (fw, fh),
+                                interpolation=cv2.INTER_NEAREST).astype(bool)
+                    self._cached_enhanced = img8
+                    self._cached_target_mask = target_mask
+                    self._cached_shadow_mask = shadow_mask
+                    self._cached_heavy_key = hk
+                    self._cached_data_generation = data_gen
+
                 colour_lut = LUT_PALETTES[LUT_NAMES[params.lut_idx]]
                 combined_lut = build_combined_lut(params.gain, params.gamma, colour_lut)
                 rgb = combined_lut[img8]
