@@ -51,6 +51,15 @@ def test_gps_panel_heading_arrow_shown_only_when_heading_given(owner):
     assert not panel._heading_visible
 
 
+def test_speed_and_heading_label_updates_on_refresh(owner):
+    track = GPSTrack()
+    track.add_fix(0, 41.47, 36.13)
+    panel = GpsPanel(track, owner)
+    panel.refresh(heading=270.0)
+    assert "270" in panel.speed_heading_label.text()
+    assert "kn" in panel.speed_heading_label.text()
+
+
 def test_add_waypoint_and_it_appears_in_the_list(owner):
     track = GPSTrack()
     track.add_fix(0, 41.47, 36.13)

@@ -1,6 +1,7 @@
 """GPS track: converts lat/lon fixes into a local flat-earth XY track keyed
 by ping index, for the waterfall's position readout and nav panel."""
 import math
+import time
 
 
 def format_degrees(value, pos_letter, neg_letter, decimals):
@@ -39,6 +40,8 @@ class GPSTrack:
         self._last_latlon = None
         self.waypoints = []  # [{'id', 'lat', 'lon', 'name'}, ...]
         self._next_waypoint_id = 1
+        self.speed_mps = 0.0
+        self._last_fix_time = None
 
     def _project(self, lat, lon):
         if self.ref_lat is None:
@@ -56,6 +59,20 @@ class GPSTrack:
         return lat, lon
 
     def add_fix(self, ping_idx, lat, lon):
+        # The wire protocol carries no speed field at all -- even the
+        # original Qt app never solved this, it hardcodes speed to 0.0
+        # (see HydroMainWindow::setBoatPosition). We derive it ourselves
+        # from consecutive fixes' wall-clock arrival time. Accurate in live
+        # mode (arrival time == real time); in fast-forwarded/instant
+        # playback this reads as playback speed, not the original survey
+        # speed -- an accepted simplification, not a bug.
+        now = time.monotonic()
+        if self._last_latlon is not None and self._last_fix_time is not None:
+            elapsed = now - self._last_fix_time
+            if elapsed > 0:
+                dist = haversine_distance_m(self._last_latlon[0], self._last_latlon[1], lat, lon)
+                self.speed_mps = dist / elapsed
+        self._last_fix_time = now
         x, y = self._project(lat, lon)
         self.ping_idx.append(ping_idx)
         self.xs.append(x)

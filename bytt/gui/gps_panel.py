@@ -3,8 +3,10 @@ the current position, (live mode only) a heading arrow, and waypoints with
 a live distance/bearing-from-current-position readout."""
 import pyqtgraph as pg
 from PySide6.QtWidgets import (
-    QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget, QInputDialog,
+    QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget, QInputDialog, QLabel,
 )
+
+_MPS_TO_KNOTS = 1.943844
 
 
 class GpsPanel(QDockWidget):
@@ -34,6 +36,8 @@ class GpsPanel(QDockWidget):
         self._x_axis.tickStrings = self._lon_tick_strings
         self._y_axis.tickStrings = self._lat_tick_strings
 
+        self.speed_heading_label = QLabel("Speed: — kn   Heading: —°")
+
         self.add_waypoint_button = QPushButton("Add Waypoint Here")
         self.add_waypoint_button.clicked.connect(self._on_add_waypoint_clicked)
         self.remove_waypoint_button = QPushButton("Remove Selected")
@@ -47,6 +51,7 @@ class GpsPanel(QDockWidget):
         body = QWidget(self)
         layout = QVBoxLayout(body)
         layout.addWidget(self._plot_widget)
+        layout.addWidget(self.speed_heading_label)
         layout.addLayout(buttons)
         layout.addWidget(self.waypoint_list)
         body.setLayout(layout)
@@ -115,6 +120,10 @@ class GpsPanel(QDockWidget):
                 self._heading_visible = False
 
         self._refresh_waypoints()
+
+        speed_kn = track.speed_mps * _MPS_TO_KNOTS
+        heading_text = f"{heading:.0f}°" if heading is not None else "—"
+        self.speed_heading_label.setText(f"Speed: {speed_kn:.1f} kn   Heading: {heading_text}")
 
     def _refresh_waypoints(self) -> None:
         xs, ys = [], []

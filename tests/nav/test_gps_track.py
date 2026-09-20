@@ -13,6 +13,21 @@ def test_bearing_due_east():
     b = bearing_deg(0.0, 0.0, 0.0, 1.0)
     assert abs(b - 90.0) < 0.01
 
+def test_speed_is_zero_before_a_second_fix():
+    track = GPSTrack()
+    track.add_fix(0, 41.30, 36.33)
+    assert track.speed_mps == 0.0
+
+def test_speed_computed_from_consecutive_fixes(monkeypatch):
+    import bytt.nav.gps_track as gps_track_module
+    times = iter([100.0, 110.0])  # 10 seconds apart
+    monkeypatch.setattr(gps_track_module.time, "monotonic", lambda: next(times))
+    track = GPSTrack()
+    track.add_fix(0, 0.0, 0.0)
+    track.add_fix(1, 0.0, 0.001)  # ~111.2 m east at the equator
+    assert track.speed_mps > 0
+    assert 10.0 < track.speed_mps < 12.0  # ~111.2m / 10s ≈ 11.12 m/s
+
 def test_add_and_remove_waypoint():
     track = GPSTrack()
     wp_id = track.add_waypoint(41.5, 36.2, "wreck")
