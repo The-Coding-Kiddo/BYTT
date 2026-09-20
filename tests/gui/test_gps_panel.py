@@ -80,3 +80,34 @@ def test_remove_selected_waypoint(owner):
     panel._on_remove_waypoint_clicked()
     assert track.waypoints == []
     assert panel.waypoint_list.count() == 0
+
+
+def test_swath_coverage_survives_a_revisited_corridor(owner):
+    # Regression test: a single self-intersecting shape spanning the whole
+    # track (the old approach) gets "erased" wherever the boat re-scans a
+    # spot, because Qt's default even-odd fill treats double-covered area
+    # as outside the shape. Per-segment quads with winding fill must not
+    # have this failure -- overlapping coverage stays filled.
+    track = GPSTrack()
+    lat, lon = 41.30, 36.33
+    track.add_fix(0, lat, lon)
+    track.add_swath_edge(track.xs[-1], track.ys[-1], 0.0, 50.0, near_range_m=5.0)
+    for i in range(1, 6):
+        lat += 0.0005
+        track.add_fix(i, lat, lon)
+        track.add_swath_edge(track.xs[-1], track.ys[-1], 0.0, 50.0, near_range_m=5.0)
+    for i in range(6, 11):  # turn around, re-scan the same corridor
+        lat -= 0.0005
+        track.add_fix(i, lat, lon)
+        track.add_swath_edge(track.xs[-1], track.ys[-1], 180.0, 50.0, near_range_m=5.0)
+
+    panel = GpsPanel(track, owner)
+    panel.refresh()
+
+    from PySide6.QtCore import QPointF
+    stbd_path = panel._swath_stbd_patch.path()
+    port_path = panel._swath_port_patch.path()
+    assert not stbd_path.isEmpty()
+    assert not port_path.isEmpty()
+    mid_y = track.ys[3]
+    assert stbd_path.contains(QPointF(20.0, mid_y)) or port_path.contains(QPointF(-20.0, mid_y))

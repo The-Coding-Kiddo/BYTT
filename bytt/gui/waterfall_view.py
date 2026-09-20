@@ -10,6 +10,7 @@ from bytt.processing.colormap import LUT_PALETTES, LUT_NAMES, build_combined_lut
 from bytt.processing.enhancement import (
     DEFAULT_ENHANCE_PARAMS, enhance_pixels, tint, heavy_key, NOISE_MODES,
 )
+from bytt.processing.nadir_detection import detect_echo_edges
 
 WORK_BUDGET_PX = 1_500_000       # paused, seeking, or ordinary file playback
 WORK_BUDGET_PX_NLM = 40_000      # NL-Means is too slow above this size
@@ -89,6 +90,25 @@ class WaterfallView(pg.GraphicsLayoutWidget):
         self.raw_buffer[-1] = raw_row_f32
         self.rows_written += 1
         self._submit_job()
+
+    def detect_channel_echo_edges(self, channel_w: int, gap: int, n_rows: int = 200):
+        """Looks at the last n_rows of buffered raw data to find each
+        channel's real near (nadir-gap) and far (noise-floor) edges, in
+        sample indices ordered near-to-far. Returns {'port': (near, far) |
+        None, 'stbd': (near, far) | None} -- None for a channel when there
+        isn't enough buffered history yet for a reliable call."""
+        if self.rows_written < n_rows:
+            # The ring buffer is zero-padded until it's actually full of
+            # real pings -- analyzing it before then would read those
+            # zero rows as "flat" everywhere and produce a nonsense result.
+            return {'port': None, 'stbd': None}
+        recent = self.raw_buffer[-n_rows:]
+        port_near_to_far = recent[:, :channel_w][:, ::-1]
+        stbd_near_to_far = recent[:, channel_w + gap:]
+        return {
+            'port': detect_echo_edges(port_near_to_far),
+            'stbd': detect_echo_edges(stbd_near_to_far),
+        }
 
     def set_enhance_params(self, params) -> None:
         self._enhance_params = params._replace(fast=self.live_mode)

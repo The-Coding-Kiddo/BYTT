@@ -368,12 +368,31 @@ class MainWindow(QMainWindow):
             heading = bearing_deg(prev_latlon[0], prev_latlon[1], nav_fix['lat'], nav_fix['lon'])
         if heading is None:
             return
-        range_m = self._current_swath_range_m()
-        if range_m is None:
+        requested_range_m = self._current_swath_range_m()
+        if requested_range_m is None:
             return
-        near_range_m = self._current_near_range_m(nav_fix, range_m)
+        near_range_m, far_range_m = self._current_echo_range_m(nav_fix, requested_range_m)
         x, y = self.gps_track.xs[-1], self.gps_track.ys[-1]
-        self.gps_track.add_swath_edge(x, y, heading, range_m, near_range_m=near_range_m)
+        self.gps_track.add_swath_edge(x, y, heading, far_range_m, near_range_m=near_range_m)
+
+    def _current_echo_range_m(self, nav_fix, requested_range_m):
+        """Prefers the real near/far echo edges measured from buffered ping
+        data (see WaterfallView.detect_channel_echo_edges) over guessing --
+        both the nadir-gap width and the usable range are backed by actual
+        amplitude behavior once enough pings have been buffered, not by
+        what we asked the sonar for or an unverified height field."""
+        gap = 8
+        channel_w = (self.waterfall.row_width - gap) // 2
+        edges = self.waterfall.detect_channel_echo_edges(channel_w, gap)
+        detected = [e for e in (edges['port'], edges['stbd']) if e is not None]
+        if detected:
+            meters_per_sample = requested_range_m / channel_w
+            near_m = sum(d[0] for d in detected) / len(detected) * meters_per_sample
+            far_m = sum(d[1] for d in detected) / len(detected) * meters_per_sample
+            return near_m, far_m
+        # Not enough buffered history yet for a reliable measurement --
+        # fall back to the same guesses used before this was built.
+        return self._current_near_range_m(nav_fix, requested_range_m), requested_range_m
 
     def _current_near_range_m(self, nav_fix, range_m):
         height = nav_fix.get('height')

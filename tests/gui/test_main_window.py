@@ -67,6 +67,24 @@ def test_ping_received_builds_swath_using_course_made_good_when_no_heading():
     assert len(window.gps_track.swath_stbd_xs) == 1
 
 
+def test_swath_uses_real_detected_edges_once_buffer_is_full(monkeypatch):
+    window = MainWindow(AppConfig())
+    monkeypatch.setattr(
+        window.waterfall, "detect_channel_echo_edges",
+        lambda channel_w, gap, n_rows=200: {'port': (10, 400), 'stbd': (10, 400)})
+
+    import numpy as np
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+    meta = {'nav_fix': {'lat': 41.30, 'lon': 36.33, 'heading': 0.0, 'height': None}}
+    window._on_ping_received(port_raw, stbd_raw, meta)
+
+    range_m = window._current_swath_range_m()
+    channel_w = (window.waterfall.row_width - 8) // 2
+    expected_far = 400 / channel_w * range_m
+    assert abs(window.gps_track.swath_stbd_xs[0] - expected_far) < 0.1
+
+
 def test_swath_leaves_a_nadir_gap_using_fallback_fraction():
     window = MainWindow(AppConfig())
     import numpy as np

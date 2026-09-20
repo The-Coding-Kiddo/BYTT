@@ -178,3 +178,36 @@ def test_large_buffer_gets_downscaled_and_upscaled_back_to_original_shape():
     assert received
     assert received[-1] is not None
     assert received[-1].shape == (50, 2000, 3)  # full original resolution after upscale-back
+
+
+def test_detect_channel_echo_edges_returns_none_before_buffer_is_full():
+    view = WaterfallView(max_rows=50, width=100)
+    row = np.random.rand(100).astype(np.float32)
+    view.add_row(row)  # far fewer than max_rows
+
+    result = view.detect_channel_echo_edges(channel_w=46, gap=8, n_rows=50)
+    assert result == {'port': None, 'stbd': None}
+
+
+def test_detect_channel_echo_edges_finds_real_edges_once_buffer_is_full():
+    channel_w, gap = 46, 8
+    width = channel_w * 2 + gap
+    view = WaterfallView(max_rows=20, width=width)
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        near = np.full(6, 0.8) + rng.normal(0, 0.001, 6)
+        real = rng.uniform(0.3, 0.9, 30)
+        far = np.full(10, 0.02) + rng.normal(0, 0.005, 10)
+        # port is stored far-to-near (reversed) in the display row.
+        port = np.concatenate([far, real, near])
+        gap_zeros = np.zeros(gap, dtype=np.float32)
+        stbd = np.concatenate([near, real, far])
+        row = np.concatenate([port, gap_zeros, stbd]).astype(np.float32)
+        view.add_row(row)
+
+    result = view.detect_channel_echo_edges(channel_w=channel_w, gap=gap, n_rows=20)
+    assert result['port'] is not None
+    assert result['stbd'] is not None
+    near_idx, far_idx = result['stbd']
+    assert 4 <= near_idx <= 8
+    assert 33 <= far_idx <= 37

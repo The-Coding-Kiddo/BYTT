@@ -2,11 +2,36 @@
 the current position, (live mode only) a heading arrow, and waypoints with
 a live distance/bearing-from-current-position readout."""
 import pyqtgraph as pg
+from PySide6.QtCore import Qt, QPointF
+from PySide6.QtGui import QPainterPath, QPolygonF
 from PySide6.QtWidgets import (
     QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget, QInputDialog, QLabel,
+    QGraphicsPathItem,
 )
 
 _MPS_TO_KNOTS = 1.943844
+
+
+def _build_coverage_path(near_xs, near_ys, far_xs, far_ys) -> QPainterPath:
+    """One independent quad per step between consecutive fixes, rather than
+    a single shape spanning the whole track. A single connected shape
+    self-intersects wherever the boat turns or re-scans a spot -- and Qt's
+    default even-odd fill rule then treats double-covered area as OUTSIDE
+    the shape, which reads as "erased" rather than "scanned twice". Winding
+    fill on many small non-self-intersecting quads has no such failure
+    mode: overlapping quads just stack (a bit darker), which is correct."""
+    path = QPainterPath()
+    path.setFillRule(Qt.FillRule.WindingFill)
+    n = min(len(near_xs), len(far_xs))
+    for i in range(n - 1):
+        quad = QPolygonF([
+            QPointF(near_xs[i], near_ys[i]),
+            QPointF(near_xs[i + 1], near_ys[i + 1]),
+            QPointF(far_xs[i + 1], far_ys[i + 1]),
+            QPointF(far_xs[i], far_ys[i]),
+        ])
+        path.addPolygon(quad)
+    return path
 
 
 class GpsPanel(QDockWidget):
@@ -19,22 +44,15 @@ class GpsPanel(QDockWidget):
         self._plot.setAspectLocked(True)
         self._plot.showGrid(x=True, y=True, alpha=0.3)
 
-        swath_pen = pg.mkPen((90, 170, 220), width=1)
-        self._swath_port_curve = self._plot.plot([], [], pen=swath_pen)
-        self._swath_stbd_curve = self._plot.plot([], [], pen=swath_pen)
-        self._swath_port_near_curve = self._plot.plot([], [], pen=swath_pen)
-        self._swath_stbd_near_curve = self._plot.plot([], [], pen=swath_pen)
-        # Fill only between the near (nadir-gap) and far edges on each side,
-        # not straight across the track -- the strip under and near the
-        # towfish is a real blind spot, not scanned seabed, so it must stay
-        # unpainted rather than reading as a solid coverage slab.
         swath_brush = pg.mkBrush(90, 170, 220, 60)
-        self._swath_port_fill = pg.FillBetweenItem(
-            self._swath_port_near_curve, self._swath_port_curve, brush=swath_brush)
-        self._swath_stbd_fill = pg.FillBetweenItem(
-            self._swath_stbd_near_curve, self._swath_stbd_curve, brush=swath_brush)
-        self._plot.addItem(self._swath_port_fill)
-        self._plot.addItem(self._swath_stbd_fill)
+        self._swath_port_patch = QGraphicsPathItem()
+        self._swath_port_patch.setBrush(swath_brush)
+        self._swath_port_patch.setPen(pg.mkPen(None))
+        self._swath_stbd_patch = QGraphicsPathItem()
+        self._swath_stbd_patch.setBrush(swath_brush)
+        self._swath_stbd_patch.setPen(pg.mkPen(None))
+        self._plot.addItem(self._swath_port_patch)
+        self._plot.addItem(self._swath_stbd_patch)
         self._track_curve = self._plot.plot([], [], pen=pg.mkPen((80, 160, 255), width=2))
         self._current_marker = pg.ScatterPlotItem(
             size=12, brush=pg.mkBrush(255, 200, 0), pen=pg.mkPen(None))
@@ -116,10 +134,12 @@ class GpsPanel(QDockWidget):
     def refresh(self, heading: float | None = None) -> None:
         track = self.gps_track
         self._track_curve.setData(track.xs, track.ys)
-        self._swath_port_curve.setData(track.swath_port_xs, track.swath_port_ys)
-        self._swath_stbd_curve.setData(track.swath_stbd_xs, track.swath_stbd_ys)
-        self._swath_port_near_curve.setData(track.swath_port_near_xs, track.swath_port_near_ys)
-        self._swath_stbd_near_curve.setData(track.swath_stbd_near_xs, track.swath_stbd_near_ys)
+        self._swath_port_patch.setPath(_build_coverage_path(
+            track.swath_port_near_xs, track.swath_port_near_ys,
+            track.swath_port_xs, track.swath_port_ys))
+        self._swath_stbd_patch.setPath(_build_coverage_path(
+            track.swath_stbd_near_xs, track.swath_stbd_near_ys,
+            track.swath_stbd_xs, track.swath_stbd_ys))
 
         if track.has_data:
             x, y = track.xs[-1], track.ys[-1]
