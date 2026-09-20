@@ -37,6 +37,34 @@ def test_record_action_enabled_on_connect_and_writes_packets(tmp_path, monkeypat
     window.command_client.close()
 
 
+def test_recording_indicator_shows_while_recording_and_clears_after(tmp_path, monkeypatch):
+    window = MainWindow(AppConfig())
+    monkeypatch.setattr(window.recorder, "directory", tmp_path)
+    window.connect_towfish("127.0.0.1", 1, 2)
+    assert window.recording_indicator.text() == ""
+
+    window.record_action.setChecked(True)
+    assert "REC" in window.recording_indicator.text()
+
+    window.record_action.setChecked(False)
+    assert window.recording_indicator.text() == ""
+
+    window.disconnect_source()
+    window.command_client.close()
+
+
+def test_recording_indicator_clears_on_disconnect(tmp_path, monkeypatch):
+    window = MainWindow(AppConfig())
+    monkeypatch.setattr(window.recorder, "directory", tmp_path)
+    window.connect_towfish("127.0.0.1", 1, 2)
+    window.record_action.setChecked(True)
+    assert "REC" in window.recording_indicator.text()
+
+    window.disconnect_source()
+    assert window.recording_indicator.text() == ""
+    window.command_client.close()
+
+
 def test_disconnect_source_stops_recording_and_disables_action(tmp_path, monkeypatch):
     window = MainWindow(AppConfig())
     monkeypatch.setattr(window.recorder, "directory", tmp_path)

@@ -157,6 +157,9 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.connection_indicators)
         self.command_client.status_changed.connect(self._on_command_status_changed)
 
+        self.recording_indicator = QLabel("")
+        self.statusBar().addPermanentWidget(self.recording_indicator)
+
         self.statusBar().showMessage("disconnected")
 
     def closeEvent(self, event):
@@ -206,9 +209,12 @@ class MainWindow(QMainWindow):
         if checked:
             path = self.recorder.start()
             self.statusBar().showMessage(f"recording to {path}")
+            self.recording_indicator.setText("● REC")
+            self.recording_indicator.setStyleSheet("color: #e74c3c; font-weight: bold;")
         else:
             self.recorder.stop()
             self.statusBar().showMessage("recording stopped")
+            self.recording_indicator.setText("")
 
     def _prompt_connect_towfish(self):
         host, ok = QInputDialog.getText(self, "Connect to Towfish", "Towfish IP:",
