@@ -14,6 +14,7 @@ class LiveClient(QObject):
     ping_received = Signal(object, object, dict)  # port_raw, stbd_raw, meta
     status_changed = Signal(str)
     raw_packet_received = Signal(bytes)
+    link_status_changed = Signal(bool, bool)  # data_up, cmd_up -- from a type-166 status packet
 
     def __init__(self, host, port, parent=None):
         super().__init__(parent)
@@ -185,3 +186,4 @@ class LiveClient(QObject):
         else:
             desc = 'sonar link down'
         self.status_changed.emit(f'connected — hw: {desc}')
+        self.link_status_changed.emit(data_up, cmd_up)

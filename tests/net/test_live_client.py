@@ -61,6 +61,37 @@ def test_live_client_emits_ping_received_for_a_166_status_packet():
     assert any("connected (data+cmd)" in s for s in statuses)
 
 
+def test_live_client_emits_link_status_changed_for_a_166_packet():
+    header = struct.pack('<IHHIHHHHI', pc.PACKET_IDENTIFIER, pc.PACKET_HEADER_SIZE,
+                          pc.PACKET_VERSION, 0, pc.PACKET_FLAG_CHECKSUM_BIT, 0, 1, 1,
+                          pc.PACKET_TYPE_166)
+    content = bytes([0x01])  # data up, cmd down
+    size = len(header) + len(content) + 4
+    header = header[:pc.PACKET_SIZE_OFFSET] + struct.pack('<I', size) + header[pc.PACKET_SIZE_OFFSET+4:]
+    from bytt.protocol.packets import compute_checksum
+    body = header + content
+    packet = body + struct.pack('<I', compute_checksum(body))
+
+    port_holder, ready, stop = [], threading.Event(), threading.Event()
+    server = threading.Thread(target=_fake_server, args=(port_holder, packet, ready, stop), daemon=True)
+    server.start()
+    ready.wait(timeout=2.0)
+
+    received = []
+    client = LiveClient("127.0.0.1", port_holder[0])
+    client.link_status_changed.connect(lambda data_up, cmd_up: received.append((data_up, cmd_up)))
+    client.start()
+    deadline = time.time() + 3.0
+    while time.time() < deadline and not received:
+        QCoreApplication.processEvents()
+        time.sleep(0.02)
+    client.stop()
+    stop.set()
+    server.join(timeout=2.0)
+
+    assert received == [(True, False)]
+
+
 def _make_multi_header(frame_id, total, packet_num, packet_type=pc.PACKET_TYPE_3101):
     """Build a minimal header-sized packet with the multi-packet fields set
     at the correct offsets, reusing the same struct pattern as the 166-status

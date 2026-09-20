@@ -51,6 +51,49 @@ def test_disconnect_source_stops_recording_and_disables_action(tmp_path, monkeyp
     window.command_client.close()
 
 
+def test_data_indicator_turns_warning_after_no_data_timeout():
+    window = MainWindow(AppConfig())
+    window.connect_towfish("127.0.0.1", 1, 2)
+    window._on_no_data_timeout()
+    assert window.connection_indicators.data._state == "warning"
+    window.disconnect_source()
+    window.command_client.close()
+
+
+def test_data_indicator_turns_ok_when_a_ping_arrives():
+    window = MainWindow(AppConfig())
+    window.connect_towfish("127.0.0.1", 1, 2)
+    import numpy as np
+    port_raw = np.linspace(0.0, 1.0, 512, dtype=np.float32)
+    stbd_raw = np.linspace(1.0, 0.0, 512, dtype=np.float32)
+    window._on_ping_received(port_raw, stbd_raw, {})
+    assert window.connection_indicators.data._state == "ok"
+    window.disconnect_source()
+    window.command_client.close()
+
+
+def test_link_status_changed_updates_sonar_indicator():
+    window = MainWindow(AppConfig())
+    window.connect_towfish("127.0.0.1", 1, 2)
+    window._on_link_status_changed(True, True)
+    assert window.connection_indicators.sonar._state == "ok"
+    window._on_link_status_changed(True, False)
+    assert window.connection_indicators.sonar._state == "warning"
+    window._on_link_status_changed(False, False)
+    assert window.connection_indicators.sonar._state == "error"
+    window.disconnect_source()
+    window.command_client.close()
+
+
+def test_disconnect_resets_indicators():
+    window = MainWindow(AppConfig())
+    window.connect_towfish("127.0.0.1", 1, 2)
+    window.connection_indicators.set_data_state("ok")
+    window.disconnect_source()
+    assert window.connection_indicators.data._state == "unknown"
+    window.command_client.close()
+
+
 def test_connect_towfish_warns_on_segment_mismatch():
     config = AppConfig(pc_ip="10.0.0.5")  # different /24 than the default towfish_ip
     window = MainWindow(config)

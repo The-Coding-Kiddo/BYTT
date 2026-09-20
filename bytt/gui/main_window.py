@@ -16,6 +16,7 @@ from bytt.nav.gps_track import GPSTrack
 from bytt.gui.gps_panel import GpsPanel
 from bytt.net.recorder import Recorder
 from bytt.config import same_segment
+from bytt.gui.connection_indicators import ConnectionIndicatorBar
 
 NO_DATA_WARNING_MS = 5000  # how long a live connection can go silent before we warn
 
@@ -151,6 +152,10 @@ class MainWindow(QMainWindow):
         self._no_data_timer.setSingleShot(True)
         self._no_data_timer.timeout.connect(self._on_no_data_timeout)
 
+        self.connection_indicators = ConnectionIndicatorBar()
+        self.statusBar().addPermanentWidget(self.connection_indicators)
+        self.command_client.status_changed.connect(self._on_command_status_changed)
+
         self.statusBar().showMessage("disconnected")
 
     def closeEvent(self, event):
@@ -166,8 +171,35 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"sonar command failed: {e}")
 
     def _on_no_data_timeout(self) -> None:
+        self.connection_indicators.set_data_state("warning")
         self.statusBar().showMessage(
             "connected but no data received — check sonar power/link")
+
+    def _on_live_status_changed(self, status: str) -> None:
+        if status == "connecting":
+            self.connection_indicators.set_data_state("warning")
+        elif status.startswith("connected"):
+            self.connection_indicators.set_data_state("ok")
+        elif status.startswith("disconnected") or status.startswith("not connected"):
+            self.connection_indicators.set_data_state("error")
+        # else (e.g. a checksum-failure message): leave the indicator as-is,
+        # a single dropped packet doesn't mean the link is down.
+
+    def _on_link_status_changed(self, data_up: bool, cmd_up: bool) -> None:
+        if data_up and cmd_up:
+            self.connection_indicators.set_sonar_state("ok")
+        elif data_up or cmd_up:
+            self.connection_indicators.set_sonar_state("warning")
+        else:
+            self.connection_indicators.set_sonar_state("error")
+
+    def _on_command_status_changed(self, status: str) -> None:
+        if status == "connecting":
+            self.connection_indicators.set_command_state("warning")
+        elif status == "connected":
+            self.connection_indicators.set_command_state("ok")
+        else:
+            self.connection_indicators.set_command_state("error")
 
     def _on_record_toggled(self, checked: bool) -> None:
         if checked:
@@ -197,6 +229,8 @@ class MainWindow(QMainWindow):
         self.source = LiveClient(host, data_port, parent=self)
         self.waterfall.live_mode = True
         self._wire_source()
+        self.source.status_changed.connect(self._on_live_status_changed)
+        self.source.link_status_changed.connect(self._on_link_status_changed)
         self.source.raw_packet_received.connect(self.recorder.write_packet)
         self.record_action.setEnabled(True)
         self.source.start()
@@ -229,6 +263,7 @@ class MainWindow(QMainWindow):
         self.record_action.setChecked(False)
         self.record_action.setEnabled(False)
         self._no_data_timer.stop()
+        self.connection_indicators.reset()
         self.playback_toolbar.setVisible(False)
         self._is_playing = False
 
@@ -321,6 +356,7 @@ class MainWindow(QMainWindow):
     def _on_ping_received(self, port_raw, stbd_raw, meta) -> None:
         if self.waterfall.live_mode:
             self._no_data_timer.start(NO_DATA_WARNING_MS)
+            self.connection_indicators.set_data_state("ok")
         # build_display_row interpolates EACH channel to channel_w samples,
         # then concatenates them with a gap in between, so the resulting row
         # length is 2*channel_w + gap. Solve for channel_w so that total
