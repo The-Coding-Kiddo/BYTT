@@ -59,8 +59,8 @@ def test_waterfall_view_add_row_stores_raw_data_in_ring_buffer():
     row_b = np.array([0.5, 0.6, 0.7, 0.8], dtype=np.float32)
     view.add_row(row_a)
     view.add_row(row_b)
-    assert np.allclose(view.raw_buffer[-1], row_b)
-    assert np.allclose(view.raw_buffer[-2], row_a)
+    assert np.allclose(view.raw_buffer[0], row_b)
+    assert np.allclose(view.raw_buffer[1], row_a)
 
 
 def _params(**overrides):
@@ -211,3 +211,81 @@ def test_detect_channel_echo_edges_finds_real_edges_once_buffer_is_full():
     near_idx, far_idx = result['stbd']
     assert 4 <= near_idx <= 8
     assert 33 <= far_idx <= 37
+
+
+def test_waterfall_view_set_dimensions_resizes_buffers():
+    view = WaterfallView(max_rows=10, width=16)
+    row = np.full(16, 0.75, dtype=np.float32)
+    view.add_row(row)
+    assert view.row_width == 16
+    assert view.raw_buffer.shape == (10, 16)
+    assert view.image_buffer.shape == (10, 16, 3)
+
+    view.set_dimensions(width=32, max_rows=15)
+    assert view.row_width == 32
+    assert view.max_rows == 15
+    assert view.raw_buffer.shape == (15, 32)
+    assert view.image_buffer.shape == (15, 32, 3)
+
+
+def test_waterfall_view_live_mode_property_syncs_fast_param():
+    view = WaterfallView(max_rows=10, width=16)
+    # Default is playback (live_mode = False) -> fast should be False
+    assert not view.live_mode
+    assert not view._enhance_params.fast
+
+    # Toggle to live mode
+    view.live_mode = True
+    assert view.live_mode
+    assert view._enhance_params.fast
+
+    # Toggle back to playback
+    view.live_mode = False
+    assert not view.live_mode
+    assert not view._enhance_params.fast
+
+
+def test_waterfall_view_set_enhance_params_enforces_live_mode():
+    from bytt.processing.enhancement import DEFAULT_ENHANCE_PARAMS
+    view = WaterfallView(max_rows=10, width=16)
+    view.live_mode = False
+
+    # Passing params with fast=True should be overridden by live_mode=False
+    params_fast_true = DEFAULT_ENHANCE_PARAMS._replace(fast=True)
+    view.set_enhance_params(params_fast_true)
+    assert not view._enhance_params.fast
+
+    # Switching live_mode=True should enforce fast=True
+    view.live_mode = True
+    params_fast_false = DEFAULT_ENHANCE_PARAMS._replace(fast=False)
+    view.set_enhance_params(params_fast_false)
+    assert view._enhance_params.fast
+
+
+def test_waterfall_view_playback_uses_full_resolution(monkeypatch):
+    import cv2
+    view = WaterfallView(max_rows=1000, width=2048)
+    view.live_mode = False
+
+    # Track cv2.resize calls during enhancement
+    resized_calls = []
+    orig_resize = cv2.resize
+    def tracked_resize(src, dsize, *args, **kwargs):
+        resized_calls.append(dsize)
+        return orig_resize(src, dsize, *args, **kwargs)
+
+    monkeypatch.setattr(cv2, "resize", tracked_resize)
+
+    row = np.full(2048, 0.5, dtype=np.float32)
+    view.add_row(row)
+
+    deadline = time.time() + 3.0
+    while time.time() < deadline and view._displayed_generation < 1:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+
+    assert view._displayed_generation >= 1
+    # For a full 2048x1000 buffer in playback mode, cv2.resize should NOT be called
+    assert len(resized_calls) == 0
+
+

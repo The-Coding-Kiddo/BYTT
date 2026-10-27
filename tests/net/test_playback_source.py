@@ -462,3 +462,34 @@ def test_nav_record_attaches_to_every_subsequent_ping_until_superseded(tmp_path)
     assert abs(received[4]['nav_fix']['lat'] - 42.0) < 1e-9
     assert received[4]['nav_fix']['heading'] is None
     assert received[4]['nav_fix']['height'] is None
+
+
+def test_playback_source_calibrates_amplitude_range_and_applies_it(tmp_path):
+    header = bytearray(pc.BSF_FILE_HDR_SZ)
+    n_samples = 10
+    ping = bytearray(pc.SAMPLE_OFFSET + 2 * n_samples * 4)
+    struct.pack_into('<I', ping, 0, pc.BSF_RECORD_TYPE)
+    struct.pack_into('<I', ping, 12, len(ping))
+    struct.pack_into('<H', ping, pc.CH_SR_OFFSET + 2, 400)
+    struct.pack_into('<I', ping, pc.CH_SR_OFFSET + 28, 96000)
+    struct.pack_into('<I', ping, pc.CH_SR_OFFSET + 52, n_samples)
+    for i in range(2 * n_samples):
+        struct.pack_into('<I', ping, pc.SAMPLE_OFFSET + i * 4, 1000000)
+    bsf_path = tmp_path / "test_cal.bsf"
+    bsf_path.write_bytes(bytes(header) + bytes(ping))
+
+    received_channels = []
+    source = PlaybackSource(str(bsf_path), pings_per_second=1000)
+    source.ping_received.connect(lambda port, stbd, meta: received_channels.append((port, stbd)))
+    source.start()
+
+    deadline = time.time() + 3.0
+    while time.time() < deadline and not received_channels:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    source.stop()
+
+    assert received_channels
+    assert source._amp_p_lo is not None
+    assert source._amp_p_hi is not None
+
