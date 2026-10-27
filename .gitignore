@@ -1,7 +1,5 @@
 /venv
 /env
-/docs
-/BYTT docs
 venve/
 *.bsf
 !tests/fixtures/*.bsf
@@ -9,4 +7,8 @@ venve/
 __pycache__/
 *.pyc
 .pytest_cache/
+bsf_viewer_error.log
+recordings/
+build/
+dist/
 
