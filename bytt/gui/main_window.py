@@ -163,6 +163,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("disconnected")
 
     def closeEvent(self, event):
+        self.waterfall._is_closing = True
+        self.waterfall._job_event.set()
         self.disconnect_source()
         self.command_client.close()
         self.recorder.stop()
@@ -465,8 +467,20 @@ class MainWindow(QMainWindow):
         # length is 2*channel_w + gap. Solve for channel_w so that total
         # equals self.waterfall.row_width, which is what add_row() requires.
         try:
-            gap = 8
-            channel_w = (self.waterfall.row_width - gap) // 2
+            gap = 8 if (self._port_on and self._stbd_on) else 0
+            n_ch = (1 if self._port_on else 0) + (1 if self._stbd_on else 0)
+            if n_ch == 0:
+                n_ch = 1
+
+            vp_w = self.waterfall.viewport().width() if hasattr(self.waterfall, 'viewport') and self.waterfall.viewport() else self.waterfall.width()
+            desired_w = max(self.waterfall.row_width, vp_w)
+            avail_w = desired_w - gap
+            channel_w = max(20, avail_w // n_ch)
+            target_total_w = channel_w * n_ch + gap
+
+            if self.waterfall.row_width != target_total_w:
+                self.waterfall.set_dimensions(width=target_total_w)
+
             row_f32 = build_display_row(
                 port_raw, stbd_raw, channel_w=channel_w,
                 port_on=self._port_on, stbd_on=self._stbd_on, gap=gap,

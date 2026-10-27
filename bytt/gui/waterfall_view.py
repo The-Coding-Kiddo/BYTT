@@ -12,7 +12,7 @@ from bytt.processing.enhancement import (
 )
 from bytt.processing.nadir_detection import detect_echo_edges
 
-WORK_BUDGET_PX = 1_500_000       # paused, seeking, or ordinary file playback
+WORK_BUDGET_PX = 2_500_000       # paused, seeking, or ordinary file playback (ensures 1:1 on 2048x1000 buffer)
 WORK_BUDGET_PX_NLM = 40_000      # NL-Means is too slow above this size
 WORK_BUDGET_PX_LIVE = 600_000    # genuine live acquisition only
 
@@ -41,14 +41,15 @@ class WaterfallView(pg.GraphicsLayoutWidget):
     enhancement_ready = Signal(object, int)   # rgb: np.ndarray | None, generation: int
     enhancement_failed = Signal(str)
 
-    def __init__(self, max_rows=2000, width=1024, palette="Amber", parent=None):
+    def __init__(self, max_rows=1000, width=2048, palette="Amber", parent=None):
         super().__init__(parent)
         self.max_rows = max_rows
         self.row_width = width
         self.rows_written = 0
         self.raw_buffer = np.zeros((max_rows, width), dtype=np.float32)
         self.image_buffer = np.zeros((max_rows, width, 3), dtype=np.uint8)
-        self._enhance_params = DEFAULT_ENHANCE_PARAMS
+        self._live_mode = False
+        self._enhance_params = DEFAULT_ENHANCE_PARAMS._replace(fast=False)
         self._combined_lut = build_combined_lut(gain=1.0, gamma=1.0,
                                                   colour_lut=LUT_PALETTES[palette])
         self._plot = self.addPlot()
@@ -56,8 +57,10 @@ class WaterfallView(pg.GraphicsLayoutWidget):
         self._image_item = pg.ImageItem(axisOrder='row-major')
         self._plot.addItem(self._image_item)
         self._image_item.setImage(self.image_buffer, levels=(0, 255))
+        self._plot.setLimits(xMin=0, xMax=width, yMin=0, yMax=max_rows)
+        self._plot.setRange(xRange=(0, width), yRange=(0, max_rows), padding=0)
 
-        self.live_mode = False
+        self._is_closing = False
         self._data_generation = 0
         self._job_lock = threading.Lock()
         self._job = None
@@ -80,14 +83,50 @@ class WaterfallView(pg.GraphicsLayoutWidget):
                                                   colour_lut=LUT_PALETTES[name])
         self._refresh()
 
+    def set_dimensions(self, width: int = None, max_rows: int = None) -> None:
+        new_width = width if width is not None else self.row_width
+        new_max_rows = max_rows if max_rows is not None else self.max_rows
+        if new_width == self.row_width and new_max_rows == self.max_rows:
+            return
+
+        with self._job_lock:
+            old_raw = self.raw_buffer
+            old_img = self.image_buffer
+            new_raw = np.zeros((new_max_rows, new_width), dtype=np.float32)
+            new_img = np.zeros((new_max_rows, new_width, 3), dtype=np.uint8)
+
+            copy_h = min(old_raw.shape[0], new_max_rows)
+            if copy_h > 0:
+                if old_raw.shape[1] == new_width:
+                    new_raw[:copy_h] = old_raw[:copy_h]
+                    new_img[:copy_h] = old_img[:copy_h]
+                else:
+                    new_raw[:copy_h] = cv2.resize(
+                        old_raw[:copy_h], (new_width, copy_h), interpolation=cv2.INTER_LINEAR
+                    )
+                    new_img[:copy_h] = cv2.resize(
+                        old_img[:copy_h], (new_width, copy_h), interpolation=cv2.INTER_NEAREST
+                    )
+
+            self.row_width = new_width
+            self.max_rows = new_max_rows
+            self.raw_buffer = new_raw
+            self.image_buffer = new_img
+            self._cached_enhanced = None
+            self._cached_data_generation = -1
+            self._plot.setLimits(xMin=0, xMax=new_width, yMin=0, yMax=new_max_rows)
+            self._plot.setRange(xRange=(0, new_width), yRange=(0, new_max_rows), padding=0)
+            self._refresh()
+
     def add_row(self, raw_row_f32: np.ndarray) -> None:
         """raw_row_f32: 1D float32 array of length self.row_width, PRE-enhancement data."""
         if raw_row_f32.shape[0] != self.row_width:
             raise ValueError(
                 f"add_row expected a row of length {self.row_width}, got {raw_row_f32.shape[0]}")
         self._data_generation += 1
-        self.raw_buffer = np.roll(self.raw_buffer, -1, axis=0)
-        self.raw_buffer[-1] = raw_row_f32
+        # Top-to-bottom: roll downward by +1, newest ping at row 0 (TOP)
+        self.raw_buffer = np.roll(self.raw_buffer, 1, axis=0)
+        self.raw_buffer[0] = raw_row_f32
         self.rows_written += 1
         self._submit_job()
 
@@ -102,7 +141,7 @@ class WaterfallView(pg.GraphicsLayoutWidget):
             # real pings -- analyzing it before then would read those
             # zero rows as "flat" everywhere and produce a nonsense result.
             return {'port': None, 'stbd': None}
-        recent = self.raw_buffer[-n_rows:]
+        recent = self.raw_buffer[:n_rows]
         port_near_to_far = recent[:, :channel_w][:, ::-1]
         stbd_near_to_far = recent[:, channel_w + gap:]
         return {
@@ -110,8 +149,22 @@ class WaterfallView(pg.GraphicsLayoutWidget):
             'stbd': detect_echo_edges(stbd_near_to_far),
         }
 
+    @property
+    def live_mode(self) -> bool:
+        return self._live_mode
+
+    @live_mode.setter
+    def live_mode(self, val: bool) -> None:
+        val = bool(val)
+        if self._live_mode != val:
+            self._live_mode = val
+            self._enhance_params = self._enhance_params._replace(fast=val)
+            self._submit_job(force=True)
+        else:
+            self._enhance_params = self._enhance_params._replace(fast=val)
+
     def set_enhance_params(self, params) -> None:
-        self._enhance_params = params._replace(fast=self.live_mode)
+        self._enhance_params = params._replace(fast=self._live_mode)
         self._submit_job(force=False)
 
     def _submit_job(self, force: bool = False) -> None:
@@ -126,10 +179,17 @@ class WaterfallView(pg.GraphicsLayoutWidget):
             self._job_sig = job_sig
         self._job_event.set()
 
+    def closeEvent(self, event):
+        self._is_closing = True
+        self._job_event.set()
+        super().closeEvent(event)
+
     def _enhancement_worker(self) -> None:
         last_done_gen = 0
-        while True:
+        while not self._is_closing:
             self._job_event.wait()
+            if self._is_closing:
+                break
             self._job_event.clear()
             with self._job_lock:
                 job = self._job
@@ -191,9 +251,15 @@ class WaterfallView(pg.GraphicsLayoutWidget):
                     rgb = rgb.copy()
                     rgb = tint(rgb, target_mask, (60, 255, 140))
                     rgb = tint(rgb, shadow_mask, (255, 60, 200))
-                self.enhancement_ready.emit(rgb, gen)
+                try:
+                    self.enhancement_ready.emit(rgb, gen)
+                except RuntimeError:
+                    break
             except Exception:
-                self.enhancement_ready.emit(None, gen)
+                try:
+                    self.enhancement_ready.emit(None, gen)
+                except RuntimeError:
+                    break
 
     def _on_enhancement_ready(self, rgb, gen: int) -> None:
         if gen <= self._displayed_generation:

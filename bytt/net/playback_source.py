@@ -8,7 +8,9 @@ import threading
 from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 from bytt.bsf.file_io import load_all_pings, read_file_header
-from bytt.protocol.packets import extract_raw_channels, get_ping_meta, extract_nav_fix
+from bytt.protocol.packets import (
+    extract_raw_channels, get_ping_meta, extract_nav_fix, calibrate_amplitude_range,
+)
 from bytt.protocol import constants as pc
 
 
@@ -27,6 +29,8 @@ class PlaybackSource(QObject):
         self._data = None
         self._pings = []
         self._sound_speed_mps = None  # from the file header; needed to compute real ping range
+        self._amp_p_lo = pc.AMP_NORM_P_LO_DEFAULT
+        self._amp_p_hi = pc.AMP_NORM_P_HI_DEFAULT
         self._nav_fixes = []  # [(ping_index_before_it, {'lat', 'lon', 'heading', 'height'}), ...]
         self._current_index = -1
         self._pending_seek = None
@@ -105,7 +109,9 @@ class PlaybackSource(QObject):
     def _emit_current(self):
         offset, size = self._pings[self._current_index]
         ping = self._data[offset:offset + size]
-        port_raw, stbd_raw = extract_raw_channels(ping)
+        port_raw, stbd_raw = extract_raw_channels(
+            ping, p_lo=self._amp_p_lo, p_hi=self._amp_p_hi
+        )
         meta = get_ping_meta(ping, sound_speed_mps=self._sound_speed_mps)
         meta['nav_fix'] = self._nav_fix_for(self._current_index)
         self.ping_received.emit(port_raw, stbd_raw, meta)
@@ -135,6 +141,7 @@ class PlaybackSource(QObject):
             self._data = path.read_bytes()
             self._sound_speed_mps = read_file_header(self._data).get('sound_speed')
             self._pings, nav_records = load_all_pings(self._data)
+            self._amp_p_lo, self._amp_p_hi = calibrate_amplitude_range(self._data, self._pings)
         except Exception as e:
             self.status_changed.emit(f'playback error: {e}')
             return
